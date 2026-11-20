@@ -4,6 +4,7 @@ from frappe_ast.cli import main
 from frappe_ast.queries.check import Checker
 from frappe_ast.queries.doctype import DoctypeReport
 from frappe_ast.queries.impact import Impact
+from frappe_ast.queries.lookup import Lookup
 from frappe_ast.queries.method import MethodTrace
 from frappe_ast.workspace import Bench
 
@@ -115,3 +116,11 @@ def test_doctype_report_client_side(store):
 	fields = report["client_fields"]
 	assert "statsu:1" in fields["read_by_client"] and "items.note" not in fields["read_by_client"]
 	assert sorted(c.split()[0] for c in fields["custom_fields"]) == ["color", "priority"]
+
+
+def test_refs_finds_python_imports(store):
+	lookup = Lookup(store, 20)
+	names = lookup.refs("frappe.api.ApiVersion")["refs"]
+	assert [(r["path"], r["kind"]) for r in names] == [("apps/demo/demo/api.py", "import_name")]
+	modules = lookup.refs("typing", kind="import")["refs"]
+	assert any(r["path"] == "apps/demo/demo/api.py" for r in modules)

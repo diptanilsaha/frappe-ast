@@ -22,7 +22,7 @@ The tool finds the bench by walking up from the cwd. Each query first refreshes 
 | Who defines, exposes, overrides, hooks or calls this method | `method erpnext.x.y.fn` |
 | Where is a symbol defined | `find make_gl_entries` · `find 'get_*_details' --lang python` |
 | Python callers / callees | `callers <dotted>` · `callees <qualname>` |
-| Who references a DocType, field, component, form event, realtime event or import | `refs "Item"` · `refs "CRM Task.due_date" --kind field` · `refs "Sales Invoice:customer" --kind form_event` · `refs list_update --kind realtime` |
+| Who references a DocType, field, component, form event, realtime event or import | `refs "Item"` · `refs "CRM Task.due_date" --kind field` · `refs "Sales Invoice:customer" --kind form_event` · `refs list_update --kind realtime` · `refs "frappe.api.ApiVersion" --kind import_name` (Python: absolute name; JS: exported name) |
 | HTTP API surface | `endpoints --app crm [--guest]` |
 | A Vue component: the definition (app or frappe-ui copy), its props, emits and slots, who renders it | `component Dialog --app crm` · `component text-editor` |
 | Apps, versions, `required_apps` (missing ones too), frontends and their frappe-ui version | `apps` |

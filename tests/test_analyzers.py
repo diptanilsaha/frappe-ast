@@ -33,6 +33,22 @@ def test_python_relative_import_in_package():
 	assert targets == {"utils": "demo.pkg.utils", "thing": "demo.pkg.sub.thing"}
 
 
+def test_python_import_refs(bench_root):
+	path = bench_root / "apps/demo/demo/api.py"
+	facts = PythonAnalyzer(APPS).analyze(str(path), path.read_text(), "demo.api")
+	assert {"frappe", "frappe.utils", "typing", "frappe.api"} <= refs(facts, "import")
+	assert {"frappe.utils.cint", "frappe.api.ApiVersion"} <= refs(facts, "import_name")
+	inner = next(r for r in facts.refs if r.target == "frappe.api.ApiVersion")
+	assert (inner.via, inner.scope, inner.access) == ("frappe.api", "demo.api.api_version", "import")
+
+
+def test_python_relative_import_refs():
+	source = "from . import utils\nfrom .sub import thing\nimport a.b as ab\n"
+	facts = PythonAnalyzer(APPS).analyze("demo/pkg/__init__.py", source, "demo.pkg")
+	assert refs(facts, "import") == {"demo.pkg", "demo.pkg.sub", "a.b"}
+	assert refs(facts, "import_name") == {"demo.pkg.utils", "demo.pkg.sub.thing"}
+
+
 def test_python_checks(bench_root):
 	path = bench_root / "apps/demo/demo/api.py"
 	facts = PythonAnalyzer(APPS).analyze(str(path), path.read_text(), "demo.api")

@@ -53,6 +53,14 @@ def on_submit_any(doc, method=None):
 		frappe.get_doc("Demo Note", row.note)
 
 
+def api_version(kind):
+	from frappe.api import ApiVersion
+
+	match kind:
+		case ApiVersion.V1:
+			return 1
+
+
 def daily():
 	frappe.enqueue("demo.api.validate_any")
 	frappe.publish_realtime("task_done", {"ok": 1})

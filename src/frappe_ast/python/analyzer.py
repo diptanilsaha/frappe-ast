@@ -80,7 +80,7 @@ class ImportMap:
 					local = alias.asname or alias.name.split(".")[0]
 					imports.names[local] = alias.name if alias.asname else local
 			elif isinstance(node, ast.ImportFrom):
-				base = imports._absolute(node)
+				base = imports.absolute(node)
 				for alias in node.names:
 					imports.names[alias.asname or alias.name] = f"{base}.{alias.name}" if base else alias.name
 		for node in tree.body:
@@ -95,7 +95,7 @@ class ImportMap:
 			return ""
 		return f"{target}.{rest}" if rest else target
 
-	def _absolute(self, node: ast.ImportFrom) -> str:
+	def absolute(self, node: ast.ImportFrom) -> str:
 		if not node.level:
 			return node.module or ""
 		parts = self.module.split(".")
@@ -143,6 +143,21 @@ class _ModuleVisitor(ast.NodeVisitor):
 			self._record_frappe_refs(node, resolved or callee)
 			self._custom_fields(custom_fields.from_call(node, resolved or callee))
 		self.generic_visit(node)
+
+	def visit_Import(self, node: ast.Import):
+		for alias in node.names:
+			self._import_ref("import", alias.name, "import", node)
+
+	def visit_ImportFrom(self, node: ast.ImportFrom):
+		base = self.imports.absolute(node)
+		self._import_ref("import", base, "import", node)
+		for alias in node.names:
+			if alias.name != "*":
+				# target = absolute name, via = module, the same shape as JS import_name refs.
+				self._import_ref("import_name", f"{base}.{alias.name}" if base else alias.name, base, node)
+
+	def _import_ref(self, kind: str, target: str, via: str, node: ast.stmt):
+		self.facts.refs.append(Ref(kind, target, via, node.lineno, self.qual_scope, "import"))
 
 	def visit_Dict(self, node: ast.Dict):
 		self._custom_fields(custom_fields.from_dict(node, self.lists))
