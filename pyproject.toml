@@ -1,7 +1,7 @@
 [project]
 name = "frappe-ast"
 version = "0.1.1"
-description = "AST toolchain for Frappe benches: index, trace and check Python, JS and Vue code."
+description = "Static AST index for Frappe benches: index, trace and check Python, JS and Vue code."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

@@ -1,4 +1,4 @@
-# frappe-ast: working on the toolchain
+# frappe-ast: working on the tool
 
 `frappe-ast` statically indexes a Frappe bench (Python, JS/TS, Vue, hooks.py, DocType JSON) into SQLite and answers Frappe-shaped questions. `harness/AGENTS.md` is the guide for agents that *use* the tool inside a bench. This file is for agents that change the tool.
 
@@ -41,7 +41,7 @@ commands/      one Command class per subcommand (base, index, code, reports, rev
 
 1. Reproduce on a real bench first: `uv run frappe-ast <cmd> --bench ~/benches/bench16` (also bench15 and maintain-bench; see `harness/AGENTS.md` for the versions).
 2. Add the case to the synthetic bench in `tests/conftest.py`, and add an assertion in `tests/test_analyzers.py` or `tests/test_queries.py`. Watch it fail.
-3. Make the change. Done when all of these are clean (run them from `frappe-ast/`):
+3. Make the change. Done when all of these are clean (run them from the repository root):
    ```sh
    uv run pytest -q
    uvx ruff check src tests && uvx ruff format --check src tests
@@ -51,7 +51,7 @@ commands/      one Command class per subcommand (base, index, code, reports, rev
 
 ## Feedback loop
 
-Agents that use the tool inside a bench report **misses** as GitHub issues on `diptanilsaha/frappe-ast`, with the labels `frappe-ast` and `miss`. `harness/AGENTS.md` ("When frappe-ast is wrong") defines a miss and holds the issue template. When you start work on this toolchain, list the open misses first, and triage each one, oldest first:
+Agents that use the tool inside a bench report **misses** as GitHub issues on `diptanilsaha/frappe-ast`, with the labels `frappe-ast` and `miss`. `harness/AGENTS.md` ("When frappe-ast is wrong") defines a miss and holds the issue template. When you start work on this tool, list the open misses first, and triage each one, oldest first:
 
 ```sh
 gh issue list --label frappe-ast,miss --state open

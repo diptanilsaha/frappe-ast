@@ -22,18 +22,19 @@ uv tool upgrade frappe-ast      # later, to get the latest main
 
 To pin a version, add `@<branch, tag or commit>` to the URL, for example `...frappe-ast.git@<ref>`. To run it once without installing, use `uvx --from "<same URL>" frappe-ast status`.
 
-From a local checkout, when you work on the tool itself (code changes take effect without a reinstall):
+From a local clone, when you work on the tool itself (code changes take effect without a reinstall):
 
 ```sh
-uv tool install --editable ~/benches/frappe-ai-toolchains/frappe-ast
+git clone https://github.com/diptanilsaha/frappe-ast.git
+uv tool install --editable ./frappe-ast
 ```
 
-Without any install, use `uv run --project ~/benches/frappe-ai-toolchains/frappe-ast frappe-ast ...`.
+Without any install, use `uv run --project <clone> frappe-ast ...`, where `<clone>` is the path to your clone.
 
-Then link the bench agent guide into each bench root. This makes AGENTS.md and CLAUDE.md symlinks, and skips any that already exist:
+Then link the bench agent guide into each bench root. This makes AGENTS.md and CLAUDE.md symlinks into the clone, and skips any that already exist:
 
 ```sh
-~/benches/frappe-ai-toolchains/frappe-ast/harness/install.sh ~/benches/bench16 ~/benches/bench15
+<clone>/harness/install.sh ~/benches/bench16 ~/benches/bench15
 ```
 
 ## Use
