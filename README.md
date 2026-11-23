@@ -1,55 +1,30 @@
 # frappe-ast
 
-A static AST index and query tool for Frappe benches. It parses Python (stdlib `ast`), JS/TS (tree-sitter), Vue SFCs, `hooks.py` and DocType JSON, and answers the questions that grep cannot answer:
+frappe-ast indexes a Frappe bench and answers questions about how its code connects.
 
-- Who calls this whitelisted method? This covers Python callers through imports and re-exports, `frappe.call`, `frm.call`, frappe-ui `createResource` / `useCall` / `useDoc` / `useDoctype`, method paths kept in constants, and `frappe.enqueue`.
-- What runs when this DocType is saved? This covers the controller lifecycle, `doc_events` from every app, overrides, and form JS.
-- What runs in the desk form when this field changes? Run `form "Sales Order" item_code` to see. It covers scripts from every app in desk load order, `frappe.ui.form.on` handlers, and the JS controller class chain (`erpnext.selling.SalesOrderController` → `SellingController` → `TransactionController` ...).
-- What is this Report, Page or Web Form made of, and is it wired correctly? Run `record "General Ledger"` and `check --rule FX208` to see.
-- Which hooks, client calls or `frm.call` targets are broken, which fields named in frontends do not exist, and which `required_apps` are missing? Run `check` to see.
-- Which frontend code breaks when this field is renamed? Run `doctype <Name>` and `refs "<DocType>.<field>" --kind field`.
-- Which frappe-ui version does each frontend build against, and what props, emits and slots does `<Dialog>` take in crm's copy? Run `apps` and `component Dialog --app crm` to see. Each distinct frappe-ui copy in `node_modules` is indexed as its own library.
-- What does this diff touch, and what depends on it? Run `impact` to see.
+## The problem
 
-## Install
+Frappe joins code through strings and conventions, not imports. A whitelisted method is called from JS as `frappe.call("app.api.x")`, as `frm.call("x")`, or from a frappe-ui resource. `hooks.py` and DocType JSON run other code by name. Another app can override a function, extend a controller class, or patch it at run time. So grep cannot tell you who calls a method or what runs when a document is saved. An agent that changes the code misses callers and breaks them.
 
-From GitHub:
+## How it works
 
-```sh
-uv tool install "git+https://github.com/diptanilsaha/frappe-ast.git"
-uv tool upgrade frappe-ast      # later, to get the latest main
-```
+1. It parses every app in the bench: Python with the stdlib `ast`, JS, TS and Vue with tree-sitter, and `hooks.py` and DocType JSON as data. It never runs app code.
+2. It writes the facts to a SQLite index: symbols, calls, the references that Frappe APIs make, hooks, DocTypes and fields.
+3. Queries join those facts across files and apps, and print one line per fact, `path:line` first.
 
-To pin a version, add `@<branch, tag or commit>` to the URL, for example `...frappe-ast.git@<ref>`. To run it once without installing, use `uvx --from "<same URL>" frappe-ast status`.
-
-From a local clone, when you work on the tool itself (code changes take effect without a reinstall):
-
-```sh
-git clone https://github.com/diptanilsaha/frappe-ast.git
-uv tool install --editable ./frappe-ast
-```
-
-Without any install, use `uv run --project <clone> frappe-ast ...`, where `<clone>` is the path to your clone.
-
-Then link the bench agent guide into each bench root. This makes AGENTS.md and CLAUDE.md symlinks into the clone, and skips any that already exist:
-
-```sh
-<clone>/harness/install.sh ~/benches/bench16 ~/benches/bench15
-```
+It runs on Python 3.11 and later, so it installs next to a v15 bench. It still reads v16 code, which is written for 3.14. The index is at `~/.cache/frappe-ast/<bench>-<hash>.sqlite`. Each query re-reads only the files that changed.
 
 ## Use
 
 ```sh
-cd ~/benches/bench16
-frappe-ast doctype "Quotation"
-frappe-ast method erpnext.selling.doctype.quotation.quotation.make_sales_order
-frappe-ast outline apps/erpnext/erpnext/selling/doctype/quotation/quotation.js
-frappe-ast check apps/erpnext/erpnext/selling
-frappe-ast impact --base origin/develop --apps erpnext
+uv tool install "git+https://github.com/diptanilsaha/frappe-ast.git"
+cd ~/benches/<bench>
+frappe-ast method erpnext.selling.doctype.quotation.quotation.make_sales_order   # who calls it, what replaces it
+frappe-ast doctype "Sales Invoice"        # controller, hooks, schema, client code
+frappe-ast form "Sales Order" item_code   # what runs in the desk form, in load order
+frappe-ast check apps/erpnext             # broken hooks, calls, fields and patches
+frappe-ast impact --base origin/develop   # what a diff touches
 frappe-ast --help
 ```
 
-The index lives at `~/.cache/frappe-ast/<bench>-<hash>.sqlite`. Each query refreshes changed files first. A full bench indexes in 4–10 s.
-
-- `harness/AGENTS.md` is the guide for agents that work in a bench.
-- `AGENTS.md` is the guide for agents that work on this tool.
+To link the agent guide into a bench, run `harness/install.sh ~/benches/<bench>`. `harness/AGENTS.md` is the guide for agents that work in a bench. `AGENTS.md` is the guide for agents that work on this tool.

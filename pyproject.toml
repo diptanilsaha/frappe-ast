@@ -3,7 +3,7 @@ name = "frappe-ast"
 version = "0.2.2"
 description = "Static AST index for Frappe benches: index, trace and check Python, JS and Vue code."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
     "tree-sitter>=0.25",
     "tree-sitter-javascript>=0.25",
@@ -25,7 +25,8 @@ packages = ["src/frappe_ast"]
 
 [tool.ruff]
 line-length = 110
-target-version = "py312"
+target-version = "py311"
+extend-exclude = ["tests/bench"]  # the synthetic bench: app code with deliberate mistakes
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "B", "I"]

@@ -13,6 +13,12 @@ SERVER_CALLS = {
 	"frappeRequest",
 	"fetch",
 	"$.ajax",
+	# frappe-react-sdk (erpnext banking): the hooks take the method path first.
+	"useFrappeGetCall",
+	"useFrappePrefetchCall",
+	"useFrappePostCall",
+	"useFrappePutCall",
+	"useFrappeDeleteCall",
 }
 # DocType resources whose optional `url` swaps in a custom server method.
 URL_OPTION_CALLS = {"createListResource", "createDocumentResource", "useList", "useDoc"}
@@ -25,6 +31,8 @@ DOC_OPTION_CALLS = {"frappe.call"}
 # else "?:m" (`doc: connected_app`), which queries treat as unknown.
 FORM_DOCS = {"frm.doc", "me.frm.doc", "this.frm.doc", "cur_frm.doc"}
 DOC_GETTERS = {"frappe.get_doc", "frappe.model.get_doc", "frappe.model.get_new_doc"}
+# Bare names that frappe.handler runs from its own globals: call("logout"), "/api/method/logout".
+HANDLER_METHODS = {"logout", "web_logout", "upload_file", "download_file"}
 
 # Calls whose first argument, or `doctype` key, is a DocType name. Value is access kind.
 DOCTYPE_CALLS = {
@@ -53,6 +61,11 @@ DOCTYPE_CALLS = {
 	"useDoctype": "read",
 	"useNewDoc": "write",
 	"getMeta": "meta",
+	"useFrappeGetDoc": "read",
+	"useFrappePrefetchDoc": "read",
+	"useFrappeGetDocList": "read",
+	"useFrappeGetDocCount": "read",
+	"useFrappePrefetchDocCount": "read",
 }
 ROUTE_CALLS = {"frappe.set_route", "frappe.router.set_route"}
 FORM_EVENT_CALLS = {"frappe.ui.form.on"}
@@ -88,8 +101,8 @@ def looks_like_method(path: str) -> bool:
 # frappe-ui calls that name a DocType and run its controller methods (see js/frappe_ui.py).
 # Option holding {key: method} and the key that names the method when the value is an object.
 DOC_METHOD_MAPS = {"useDoc": ("methods", "name"), "createDocumentResource": ("whitelistedMethods", "method")}
-# useDoctype(X).<member>.submit({method}) and the ref kind it makes.
-DOCTYPE_HANDLES = {"useDoctype"}
+# useDoctype(X) / createListResource({doctype: X}).<member>.submit({method}) and the ref kind it makes.
+DOCTYPE_HANDLES = {"useDoctype", "createListResource"}
 DOCTYPE_RUNNERS = {"runDocMethod": "doc_method", "runMethod": "module_method"}
 # REST API v2 URLs, `*` standing for a template substitution.
 URL_METHODS = (

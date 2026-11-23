@@ -55,7 +55,7 @@ class DeskRefs:
 		if "." in method:
 			self.ref("method", method, callee, node, scope, "call")
 		elif doc is not None:
-			self.ref("doc_method", _doc_target(doc) + method, callee, node, scope, "call")
+			self.ref("doc_method", doc_target(doc) + method, callee, node, scope, "call")
 		else:
 			self.ref("module_method", method, callee, node, scope, "call")
 
@@ -142,7 +142,7 @@ def _names(value: Node):
 			yield key, member
 
 
-def _doc_target(doc: Node) -> str:
+def doc_target(doc: Node) -> str:
 	"""Target prefix for `doc: <doc>`: "" for the form's doc, "X:" or "?:" for another doc."""
 	value = n.compact(n.text(doc))
 	if value in fp.FORM_DOCS:

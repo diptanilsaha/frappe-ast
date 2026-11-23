@@ -9,6 +9,8 @@ import ast
 from dataclasses import dataclass
 from pathlib import Path
 
+from frappe_ast.python import compat
+
 
 @dataclass
 class HookEntry:
@@ -29,7 +31,7 @@ class HooksReader:
 	def read(self, app_name: str, hooks_py: Path) -> list[HookEntry]:
 		if not hooks_py.exists():
 			return []
-		tree = ast.parse(hooks_py.read_text(), filename=str(hooks_py))
+		tree = compat.parse(hooks_py.read_text(), filename=str(hooks_py))
 		env = _Evaluator().run(tree)
 		entries: list[HookEntry] = []
 		for key, value in env.items():

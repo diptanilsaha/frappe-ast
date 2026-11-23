@@ -1,0 +1,16 @@
+{
+	"doctype": "DocType",
+	"name": "Demo Note",
+	"module": "Demo",
+	"istable": 1,
+	"fields": [
+		{
+			"fieldname": "note",
+			"fieldtype": "Data"
+		},
+		{
+			"fieldname": "title",
+			"fieldtype": "Data"
+		}
+	]
+}

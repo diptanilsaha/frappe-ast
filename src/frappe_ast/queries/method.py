@@ -1,6 +1,7 @@
 """`frappe-ast method <dotted>`: everything that defines, exposes or calls a server method."""
 
 from frappe_ast.queries.doc_calls import DocCalls
+from frappe_ast.queries.patches import Patches
 from frappe_ast.queries.resolver import Resolver
 from frappe_ast.store import Store
 
@@ -22,7 +23,8 @@ class MethodTrace:
 				"hooks": self._hooks(dotted),
 			}
 		qualname = symbol["qualname"]
-		names = sorted({dotted, qualname})
+		# Callers can name any re-export path of the definition.
+		names = sorted({dotted, qualname, *self.resolver.aliases_of(qualname)})
 		client_calls, maybe_client_calls = DocCalls(self.store, self.resolver).trace(symbol)
 		return {
 			"query": dotted,
@@ -30,8 +32,11 @@ class MethodTrace:
 			"definition": symbol,
 			"doctype": self._doctype(symbol),
 			"overridden_by": self._overrides(names),
+			# Monkey patches and regional_overrides: another function may run instead of this one.
+			"patched_by": Patches(self.store, self.resolver).patched_by(names),
+			"patches": Patches(self.store, self.resolver).patches(names),
 			"hooks": self._hooks(*names),
-			"python_callers": self._python_callers(qualname),
+			"python_callers": self._python_callers(names),
 			"maybe_callers": self._maybe_callers(symbol),
 			"string_refs": self._string_refs(names),
 			"client_calls": client_calls[: self.limit],
@@ -58,11 +63,12 @@ class MethodTrace:
 			self.limit,
 		)
 
-	def _python_callers(self, qualname: str) -> list[dict]:
+	def _python_callers(self, names: list[str]) -> list[dict]:
+		marks = ",".join("?" * len(names))
 		return self.store.rows(
 			"select f.path, c.line, c.caller as scope, c.callee from calls c join files f on f.id = c.file_id "
-			"where c.resolved = ? order by f.path, c.line limit ?",
-			qualname,
+			f"where c.resolved in ({marks}) order by f.path, c.line limit ?",
+			*names,
 			self.limit,
 		)
 

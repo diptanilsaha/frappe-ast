@@ -30,6 +30,21 @@ class Resolver:
 			dotted = row["signature"]
 		return None
 
+	def aliases_of(self, qualname: str) -> list[str]:
+		"""Re-export paths that resolve to `qualname`: `from .api import run` in api/__init__.py
+		makes `pkg.api.run` a path callers use for `pkg.api.api.run`."""
+		found, frontier = set(), [qualname]
+		while frontier and len(found) < 50:
+			marks = ",".join("?" * len(frontier))
+			rows = self.store.rows(
+				f"select qualname from symbols where kind = 'alias' and signature in ({marks})", *frontier
+			)
+			frontier = [
+				r["qualname"] for r in rows if r["qualname"] not in found and r["qualname"] != qualname
+			]
+			found.update(frontier)
+		return sorted(found)
+
 	def module_exists(self, dotted: str) -> bool:
 		return bool(self.store.rows("select 1 from files where module = ? limit 1", dotted))
 

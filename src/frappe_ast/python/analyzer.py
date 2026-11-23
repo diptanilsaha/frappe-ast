@@ -4,10 +4,18 @@ import ast
 import re
 
 from frappe_ast.model import Call, FileFacts, Ref, Symbol
-from frappe_ast.python import custom_fields
+from frappe_ast.python import compat, custom_fields
 from frappe_ast.python.astutil import dotted, truthy
 from frappe_ast.python.checks import PythonChecks
-from frappe_ast.python.frappe_api import DOCTYPE_APIS, DOTTED_APIS, REALTIME_APIS, doctype_arg, realtime_event
+from frappe_ast.python.frappe_api import (
+	API_URL_RE,
+	DOCTYPE_APIS,
+	DOTTED_APIS,
+	REALTIME_APIS,
+	doctype_arg,
+	realtime_event,
+)
+from frappe_ast.python.patches import PatchRefs
 
 DOTTED_RE = re.compile(r"^[a-z_][a-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*){2,}$")
 
@@ -19,7 +27,7 @@ class PythonAnalyzer:
 	def analyze(self, path: str, source: str, module: str) -> FileFacts:
 		facts = FileFacts(path=path, lang="python", module=module)
 		try:
-			tree = ast.parse(source, filename=path)
+			tree = compat.parse(source, filename=path)
 		except SyntaxError as e:
 			facts.error = f"SyntaxError: {e.msg} (line {e.lineno})"
 			return facts
@@ -118,7 +126,9 @@ class _ModuleVisitor(ast.NodeVisitor):
 		self.lists = lists
 		self.imports = imports
 		self.known_apps = known_apps
+		self.patches = PatchRefs(imports, known_apps)
 		self.scope: list[tuple[str, str]] = []  # (kind, name)
+		self.local_defs: list[set[str]] = [set()]  # functions each enclosing def defines directly
 
 	@property
 	def qual_scope(self) -> str:
@@ -137,7 +147,11 @@ class _ModuleVisitor(ast.NodeVisitor):
 		in_class = bool(self.scope) and self.scope[-1][0] == "class"
 		self._add_symbol(node, "method" if in_class else "function", signature=_signature(node))
 		self.scope.append(("def", node.name))
+		self.local_defs.append(
+			{c.name for c in node.body if isinstance(c, ast.FunctionDef | ast.AsyncFunctionDef)}
+		)
 		self.generic_visit(node)
+		self.local_defs.pop()
 		self.scope.pop()
 
 	visit_AsyncFunctionDef = visit_FunctionDef
@@ -149,6 +163,12 @@ class _ModuleVisitor(ast.NodeVisitor):
 			self.facts.calls.append(Call(self.qual_scope, callee, resolved, node.lineno))
 			self._record_frappe_refs(node, resolved or callee)
 			self._custom_fields(custom_fields.from_call(node, resolved or callee))
+			if callee == "setattr":
+				self.facts.refs += self.patches.from_setattr(node, self.qual_scope, self.local_defs[-1])
+		self.generic_visit(node)
+
+	def visit_Assign(self, node: ast.Assign):
+		self.facts.refs += self.patches.from_assign(node, self.qual_scope, self.local_defs[-1])
 		self.generic_visit(node)
 
 	def visit_Import(self, node: ast.Import):
@@ -176,8 +196,12 @@ class _ModuleVisitor(ast.NodeVisitor):
 
 	def visit_Constant(self, node: ast.Constant):
 		value = node.value
-		if isinstance(value, str) and DOTTED_RE.match(value) and value.split(".")[0] in self.known_apps:
-			self.facts.refs.append(Ref("dotted", value, "string", node.lineno, self.qual_scope, "call"))
+		if not isinstance(value, str):
+			return
+		url = API_URL_RE.search(value) if "method/" in value else None
+		method, via = (url.group(1), "url") if url else (value, "string")
+		if DOTTED_RE.match(method) and method.split(".")[0] in self.known_apps:
+			self.facts.refs.append(Ref("dotted", method, via, node.lineno, self.qual_scope, "call"))
 
 	def _add_symbol(self, node, kind: str, signature: str):
 		decorators = [ast.unparse(d) for d in node.decorator_list]

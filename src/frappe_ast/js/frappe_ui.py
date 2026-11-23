@@ -17,10 +17,13 @@ class DocMethodRefs:
 		self.ref = ref  # _Walker._ref
 		self.handles: dict[str, str] = {}  # variable -> DocType, from `x = useDoctype("X")`
 
-	def bind(self, name: Node | None, value: Node | None):
+	def bind(self, name: Node | None, value: Node | None, scope: list[str]):
+		"""`x = useDoctype("X")` or createListResource({doctype}). A `doctype_handle` ref (via is the
+		variable) lets queries resolve the handle when another file imports it."""
 		doctype = _handle_doctype(value, {})
 		if name is not None and name.type == "identifier" and doctype:
 			self.handles[n.text(name)] = doctype
+			self.ref("doctype_handle", doctype, n.text(name), name, scope, "define")
 
 	def on_call(self, callee: str, func: Node, args: list[Node], node: Node, scope: list[str]):
 		if not args:
@@ -56,10 +59,16 @@ class DocMethodRefs:
 		if runner is None or runner.type != "member_expression":
 			return
 		kind = fp.DOCTYPE_RUNNERS.get(n.text(runner.child_by_field_name("property")))
-		doctype = _handle_doctype(runner.child_by_field_name("object"), self.handles)
+		handle = runner.child_by_field_name("object")
+		doctype = _handle_doctype(handle, self.handles)
 		method = n.string(n.object_get(payload, "method"))
 		if kind and doctype and method:
 			self.ref(kind, f"{doctype}:{method}", callee.split(".")[-2], node, scope, "call")
+		elif kind and method and handle is not None and handle.type == "identifier":
+			# A handle from another file: `handle_method` "<variable>:<method>", via the runner.
+			self.ref(
+				"handle_method", f"{n.text(handle)}:{method}", callee.split(".")[-2], node, scope, "call"
+			)
 
 
 def _handle_doctype(node: Node | None, handles: dict[str, str]) -> str:
@@ -69,5 +78,5 @@ def _handle_doctype(node: Node | None, handles: dict[str, str]) -> str:
 		return handles.get(n.text(node), "")
 	if node.type == "call_expression" and n.text(node.child_by_field_name("function")) in fp.DOCTYPE_HANDLES:
 		args = n.arguments(node)
-		return n.string(args[0]) if args else ""
+		return (n.string(args[0]) or n.string(n.object_get(args[0], "doctype"))) if args else ""
 	return ""

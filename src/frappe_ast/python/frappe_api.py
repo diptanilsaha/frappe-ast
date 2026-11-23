@@ -5,6 +5,7 @@ Keys are absolute dotted names after import resolution, so
 """
 
 import ast
+import re
 
 # API -> access kind
 DOCTYPE_APIS = {
@@ -116,3 +117,8 @@ def realtime_event(node: ast.Call) -> str:
 	"""The `event` of publish_realtime(event, message, ...), positional or keyword."""
 	value = node.args[0] if node.args else next((k.value for k in node.keywords if k.arg == "event"), None)
 	return value.value if isinstance(value, ast.Constant) and isinstance(value.value, str) else ""
+
+
+# A server method inside a URL: "/api/method/app.api.x?y=1", get_url("/api/method/..."), and the
+# constant part of f"/api/method/app.api.x?y={y}". A path cut by an interpolation does not match.
+API_URL_RE = re.compile(r"(?:^|/)api/(?:v2/)?method/([a-z_]\w*(?:\.\w+)+)(?=$|[?#/])")

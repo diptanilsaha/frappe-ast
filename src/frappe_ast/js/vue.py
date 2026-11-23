@@ -12,6 +12,8 @@ LANG_RE = re.compile(r"""lang\s*=\s*["'](\w+)["']""")
 COMPONENT_RE = re.compile(r"<([A-Z][A-Za-z0-9]*(?:\.[A-Z]\w*)?|[a-z][a-z0-9]*(?:-[a-z0-9]+)+)[\s/>]")
 EVENT_RE = re.compile(r"""(?:@|v-on:)([\w:.-]+)\s*=\s*"([^"]*)\"""")
 HANDLER_NAME_RE = re.compile(r"^\s*([A-Za-z_$][\w$.]*)\s*(\(|$)")
+# api-url="app.api.x" or :url="'app.api.x'": a method path a component receives as a prop.
+ATTR_METHOD_RE = re.compile(r"\s:?[\w-]+\s*=\s*\"'?([a-z_]\w*(?:\.\w+){2,})'?\"")
 # defineProps<ButtonProps>(), defineProps(buttonProps), defineComponent({ props: buttonProps }); same for emits and slots.
 API_RES = {
 	part: (
@@ -52,6 +54,10 @@ class VueAnalyzer:
 			if tag.lower() not in NON_COMPONENTS:
 				line = base_line + text.count("\n", 0, match.start())
 				facts.refs.append(Ref("component", tag, "template", line, "<template>", "render"))
+		for match in ATTR_METHOD_RE.finditer(text):
+			if match.group(1).split(".")[0] in self.js.known_apps:
+				line = base_line + text.count("\n", 0, match.start())
+				facts.refs.append(Ref("dotted", match.group(1), "template", line, "<template>", "call"))
 		for match in EVENT_RE.finditer(text):
 			handler = HANDLER_NAME_RE.match(match.group(2))
 			if handler:

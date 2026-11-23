@@ -1,0 +1,6 @@
+{
+	"doctype": "Number Card",
+	"name": "Open Task Count",
+	"document_type": "Demo Task",
+	"filters_json": "[[\"Demo Task\",\"status\",\"=\",\"Open\"],[\"Demo Task\",\"colour\",\"=\",\"x\"]]"
+}

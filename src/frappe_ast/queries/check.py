@@ -9,12 +9,14 @@ Cross-file rules:
   FX206 warning  required_apps names an app that is not in this bench (its references go unchecked)
   FX207 warning  client or record names a field (fields, filters, frm.set_value, frm.doc.x) the DocType does not declare
   FX208 error    a Report or Page JSON and its .py / .js disagree (no execute(), registered under another name)
+  FX209 warning  an app monkey-patches a function or method of another app that does not exist (renamed upstream)
 """
 
 from frappe_ast.queries.apps import app_name_of
 from frappe_ast.queries.doc_checks import DocTypeClientChecks
 from frappe_ast.queries.finding import finding as _finding
 from frappe_ast.queries.forms import FORM_EVENTS, ROW_EVENT_SUFFIXES
+from frappe_ast.queries.patches import Patches
 from frappe_ast.queries.record import RecordChecks
 from frappe_ast.queries.resolver import Resolver
 from frappe_ast.store import Store
@@ -42,6 +44,7 @@ class Checker:
 			)
 			findings += self._form_handlers(path_prefix)
 			findings += self._missing_required_apps(path_prefix) + RecordChecks(self.store).run(path_prefix)
+			findings += Patches(self.store, self.resolver).missing(path_prefix)
 		if rules:
 			findings = [f for f in findings if f["rule"] in rules]
 		return sorted(findings, key=lambda f: (f["path"], f["line"]))

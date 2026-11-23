@@ -4,6 +4,7 @@ import re
 import subprocess
 from pathlib import Path
 
+from frappe_ast.queries.patches import Patches
 from frappe_ast.queries.resolver import SYMBOL_COLS, Resolver
 from frappe_ast.store import Store
 from frappe_ast.workspace import App
@@ -60,16 +61,25 @@ class Impact:
 			impact["exposure"] = "whitelisted" + (" guest" if sym["allow_guest"] else "")
 		if sym["lang"] != "python":
 			return impact
+		names = [qual, *self.resolver.aliases_of(qual)]  # callers can name a re-export path
+		marks = ",".join("?" * len(names))
 		self._add(
 			impact,
 			"callers",
-			"select f.path, c.line, c.caller as scope from calls c join files f on f.id = c.file_id where c.resolved = ?",
-			qual,
+			"select f.path, c.line, c.caller as scope from calls c join files f on f.id = c.file_id "
+			f"where c.resolved in ({marks})",
+			*names,
 		)
-		self._add(impact, "hooks", "select app, key, p1, p2, line from hooks where value = ?", qual)
+		self._add(
+			impact, "hooks", f"select app, key, p1, p2, line from hooks where value in ({marks})", *names
+		)
 		self._add(impact, "string_refs",
 			"select f.path, r.line, r.via, r.scope from refs r join files f on f.id = r.file_id "
-			"where r.kind in ('method', 'dotted') and r.target = ?", qual)  # fmt: skip
+			f"where r.kind in ('method', 'dotted') and r.target in ({marks})", *names)  # fmt: skip
+		# A wrapper that replaces this function must keep its signature.
+		patched = Patches(self.store, self.resolver).patched_by(names)
+		if patched:
+			impact["patched_by"] = patched[: self.limit]
 		return impact
 
 	def _add(self, impact: dict, key: str, sql: str, *params):

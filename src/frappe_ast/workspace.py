@@ -118,4 +118,9 @@ def python_module(app: App, path: Path) -> str:
 
 
 def _is_build_output(dirpath: str) -> bool:
-	return f"{os.sep}public{os.sep}dist" in dirpath or f"{os.sep}public{os.sep}frontend" in dirpath
+	if f"{os.sep}public{os.sep}dist" in dirpath or f"{os.sep}public{os.sep}frontend" in dirpath:
+		return True
+	# Vite builds that apps commit: public/<ui>/assets/index-<hash>.js and public/app_builds.
+	parts = Path(dirpath).parts
+	at = len(parts) - 1 - parts[::-1].index("public") if "public" in parts else -1
+	return at >= 0 and (parts[at + 1 : at + 2] == ("app_builds",) or parts[at + 2 : at + 3] == ("assets",))

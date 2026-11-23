@@ -13,6 +13,7 @@ from frappe_ast.js.client_api import DocTypeData
 from frappe_ast.js.desk import DeskRefs
 from frappe_ast.js.form_setup import FormSetups
 from frappe_ast.js.frappe_ui import DocMethodRefs
+from frappe_ast.js.method_values import MethodValues
 from frappe_ast.js.nodes import FUNCTION_TYPES
 from frappe_ast.js.ts_types import TypeSymbols
 from frappe_ast.model import Call, FileFacts, Ref, Symbol
@@ -39,15 +40,16 @@ class JsAnalyzer:
 		if tree.root_node.has_error and not facts.error:
 			facts.error = "partial parse (syntax errors)"
 		consts = constants.collect(tree.root_node)
-		walker = _Walker(facts, self.known_apps, line_offset, consts)
+		walker = _Walker(facts, self.known_apps, line_offset, consts, tree.root_node)
 		for name, (method, node) in consts.items():
 			walker._symbol(node, name.split(".")[-1], "const", [], qualname=name, signature=f' = "{method}"')
 		walker.walk(tree.root_node, [])
+		walker.values.finish()
 		return facts
 
 
 class _Walker(TypeSymbols):
-	def __init__(self, facts: FileFacts, known_apps: set[str], line_offset: int, consts: dict):
+	def __init__(self, facts: FileFacts, known_apps: set[str], line_offset: int, consts: dict, root: Node):
 		self.facts = facts
 		self.known_apps = known_apps
 		self.offset = line_offset
@@ -56,6 +58,7 @@ class _Walker(TypeSymbols):
 		self.data = DocTypeData(self._ref)
 		self.desk = DeskRefs(self._ref)
 		self.setup = FormSetups(self._ref, known_apps)
+		self.values = MethodValues(self._ref, consts, root)
 
 	def walk(self, node: Node, scope: list[str]):
 		handler = getattr(self, f"_on_{node.type}", None)
@@ -88,7 +91,7 @@ class _Walker(TypeSymbols):
 
 	def _on_variable_declarator(self, node, scope):
 		name, value = node.child_by_field_name("name"), node.child_by_field_name("value")
-		self.ui.bind(name, value)
+		self.ui.bind(name, value, scope)
 		if value is not None and value.type in FUNCTION_TYPES:
 			return self._symbol(node, n.text(name), "function", scope)
 		self._props_object(node, name, value, scope)
@@ -139,7 +142,10 @@ class _Walker(TypeSymbols):
 	def _on_template_string(self, node, scope):
 		value = n.pattern(node)
 		self.ui.on_url(value, node, scope)
-		self._dotted(value, node, scope)
+		# `${METHOD}.x` with METHOD a constant or a `this.x` path: each path it can build.
+		built = self.values.value(node)[0] if "*" in value else None
+		for path in built or [value]:
+			self._dotted(path, node, scope)
 		return None
 
 	def _on_string(self, node, scope):
@@ -161,6 +167,7 @@ class _Walker(TypeSymbols):
 			return None
 		self.facts.calls.append(Call(self._scope_name(scope), callee, "", self._line(node)))
 		args = n.arguments(node)
+		self.values.on_call(callee, args, scope)
 		if callee in fp.FORM_EVENT_CALLS:
 			return self.setup.on_form_on(node, args, scope)
 		self._server_call(callee, args, node, scope)
@@ -181,17 +188,21 @@ class _Walker(TypeSymbols):
 	def _server_call(self, callee, args, node, scope):
 		if not args:
 			return
+		first = args[0]
 		if callee in fp.DOC_METHOD_CALLS or callee.endswith(".frm.call"):
-			self.desk.on_doc_call(callee, args[0], node, scope)
+			if not self.values.on_doc_call(n.object_get(first, "method"), n.object_get(first, "doc")):
+				self.desk.on_doc_call(callee, first, node, scope)
 			return
 		if callee in fp.URL_OPTION_CALLS:
 			self._method_path(callee, n.object_get(args[0], "url"), scope)
 			return
 		if callee not in fp.SERVER_CALLS:
 			return
-		first = args[0]
 		if callee in fp.DOC_OPTION_CALLS and n.object_get(first, "doc") is not None:
-			self.desk.on_doc_call(callee, first, node, scope)
+			if not self.values.on_doc_call(n.object_get(first, "method"), n.object_get(first, "doc")):
+				self.desk.on_doc_call(callee, first, node, scope)
+			return
+		if self.values.on_server_call(callee, args, node, scope):
 			return
 		# `method` may be an HTTP verb ("POST") next to `url`; keep the first path-like value.
 		for candidate in (first, n.object_get(first, "method"), n.object_get(first, "url")):

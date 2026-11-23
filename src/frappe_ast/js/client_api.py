@@ -94,6 +94,8 @@ def _field_names(value: Node | None):
 				item = item.named_children[0]  # [["status", "=", "Open"]]
 			if item.type == "string":
 				yield from _plain(n.string(item).split(" ")[0], item)
+	elif value.type == "object" and n.object_get(value, "field") is not None:
+		yield from _field_names(n.object_get(value, "field"))  # frappe-react-sdk orderBy: {field, order}
 	elif value.type == "object":
 		for key, member in n.object_members(value):
 			yield from _plain(key, member)

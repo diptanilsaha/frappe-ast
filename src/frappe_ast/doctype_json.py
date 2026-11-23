@@ -131,29 +131,47 @@ class DocTypeReader:
 		for path in package.glob("*/doctype/*/*.json"):
 			if path.stem != path.parent.name:
 				continue
-			doc = self._load(path)
+			text = self._read(path)
+			doc = self._load(text)
 			if isinstance(doc, dict) and doc.get("doctype") == "DocType" and doc.get("name"):
-				yield self._build(doc, app_name, str(path.relative_to(bench_root)))
+				yield self._build(doc, app_name, str(path.relative_to(bench_root)), text)
 
-	def _load(self, path: Path) -> dict | None:
+	def _read(self, path: Path) -> str:
 		try:
-			return json.loads(path.read_text())
-		except (json.JSONDecodeError, UnicodeDecodeError):
+			return path.read_text()
+		except UnicodeDecodeError:
+			return ""
+
+	def _load(self, text: str) -> dict | None:
+		try:
+			return json.loads(text)
+		except json.JSONDecodeError:
 			return None
 
-	def _build(self, doc: dict, app: str, path: str) -> DocTypeDef:
+	def _build(self, doc: dict, app: str, path: str, text: str) -> DocTypeDef:
+		fields = [
+			{k: f[k] for k in FIELD_KEYS if f.get(k) not in (None, "", 0)} for f in doc.get("fields", [])
+		]
+		_add_lines(fields, text)
 		return DocTypeDef(
 			name=doc["name"],
 			app=app,
 			module=doc.get("module", ""),
 			path=path,
 			flags={k: doc[k] for k in FLAG_KEYS if doc.get(k)},
-			fields=[
-				{k: f[k] for k in FIELD_KEYS if f.get(k) not in (None, "", 0)} for f in doc.get("fields", [])
-			],
+			fields=fields,
 			permissions=[_permission(p) for p in doc.get("permissions", [])],
 			links=_links(doc),
 		)
+
+
+def _add_lines(fields: list[dict], text: str):
+	"""Each field's line in the JSON, so a Button field can be reported as path:line."""
+	at = 0
+	for f in fields:
+		found = text.find(f'"fieldname": {json.dumps(f.get("fieldname", ""))}', at)
+		if found >= 0:
+			f["line"], at = text.count("\n", 0, found) + 1, found
 
 
 def _permission(perm: dict) -> dict:
