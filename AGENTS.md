@@ -51,7 +51,7 @@ commands/      one Command class per subcommand (base, index, code, reports, rev
 
 ## Feedback loop
 
-Agents that use the tool inside a bench report **misses** as GitHub issues on `diptanilsaha/frappe-ai-toolchains`, with the labels `frappe-ast` and `miss`. `harness/AGENTS.md` ("When frappe-ast is wrong") defines a miss and holds the issue template. When you start work on this toolchain, list the open misses first, and triage each one, oldest first:
+Agents that use the tool inside a bench report **misses** as GitHub issues on `diptanilsaha/frappe-ast`, with the labels `frappe-ast` and `miss`. `harness/AGENTS.md` ("When frappe-ast is wrong") defines a miss and holds the issue template. When you start work on this toolchain, list the open misses first, and triage each one, oldest first:
 
 ```sh
 gh issue list --label frappe-ast,miss --state open

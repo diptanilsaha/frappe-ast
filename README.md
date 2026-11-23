@@ -13,29 +13,27 @@ A static AST index and query tool for Frappe benches. It parses Python (stdlib `
 
 ## Install
 
-frappe-ast is one package in the `frappe-ai-toolchains` monorepo. Installing it does not install the other toolchains.
-
-From GitHub, which needs access to the private repo (an SSH key, or `gh auth setup-git` for HTTPS):
+From GitHub:
 
 ```sh
-uv tool install "git+ssh://git@github.com/diptanilsaha/frappe-ai-toolchains.git#subdirectory=frappe-ast"
+uv tool install "git+https://github.com/diptanilsaha/frappe-ast.git"
 uv tool upgrade frappe-ast      # later, to get the latest main
 ```
 
-To pin a version, add `@<branch, tag or commit>` before `#subdirectory`, for example `...frappe-ai-toolchains.git@<ref>#subdirectory=frappe-ast`. To run it once without installing, use `uvx --from "<same URL>" frappe-ast status`.
+To pin a version, add `@<branch, tag or commit>` to the URL, for example `...frappe-ast.git@<ref>`. To run it once without installing, use `uvx --from "<same URL>" frappe-ast status`.
 
 From a local checkout, when you work on the tool itself (code changes take effect without a reinstall):
 
 ```sh
-uv tool install --editable ~/benches/frappe-ai-toolchains/frappe-ast
+uv tool install --editable ~/benches/frappe-ast
 ```
 
-Without any install, use `uv run --project ~/benches/frappe-ai-toolchains/frappe-ast frappe-ast ...`.
+Without any install, use `uv run --project ~/benches/frappe-ast frappe-ast ...`.
 
 Then link the bench agent guide into each bench root. This makes AGENTS.md and CLAUDE.md symlinks, and skips any that already exist:
 
 ```sh
-~/benches/frappe-ai-toolchains/frappe-ast/harness/install.sh ~/benches/bench16 ~/benches/bench15
+~/benches/frappe-ast/harness/install.sh ~/benches/bench16 ~/benches/bench15
 ```
 
 ## Use

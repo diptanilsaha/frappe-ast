@@ -8,7 +8,7 @@ This bench holds Frappe apps under `apps/<app>/`. Python runs on the server; des
 
 ```sh
 frappe-ast <command> [args] [--json] [--limit N]
-# not on PATH: uv run --project ~/benches/frappe-ai-toolchains/frappe-ast frappe-ast ...
+# not on PATH: uv run --project ~/benches/frappe-ast frappe-ast ...
 ```
 
 The tool finds the bench by walking up from the cwd. Each query first refreshes the index for changed files (under a second). The first run builds the full index in about 10 s. Paths in the output are relative to the bench root, as `path:line`.
@@ -60,12 +60,12 @@ A **miss** is any time the tool's answer disagrees with the code. Every miss you
 
 A gap that "What static analysis cannot see" (below) already lists is not a miss.
 
-**When you find a miss, open an issue** on `diptanilsaha/frappe-ai-toolchains` (private) with `gh`:
+**When you find a miss, open an issue** on `diptanilsaha/frappe-ast` with `gh`:
 
 1. Confirm it against the source. Read the lines that prove the tool is wrong, and keep their `path:line`.
 2. Search for an issue about the same pattern, open or closed:
    ```sh
-   gh issue list -R diptanilsaha/frappe-ai-toolchains --label frappe-ast,miss --state all --search "<pattern words>"
+   gh issue list -R diptanilsaha/frappe-ast --label frappe-ast,miss --state all --search "<pattern words>"
    ```
    If an open issue covers it, add your case with `gh issue comment <n> --body-file <file>` and go to step 4. If a closed one covers it, the fix did not hold. Open a new issue that links the closed one.
 3. Write the body to a temporary file from this template, then open the issue:
@@ -81,7 +81,7 @@ A gap that "What static analysis cannot see" (below) already lists is not a miss
    <bench-relative path:line of the code that proves it, with the 1-5 lines that matter>
    ```
    ```sh
-   gh issue create -R diptanilsaha/frappe-ai-toolchains --label frappe-ast,miss \
+   gh issue create -R diptanilsaha/frappe-ast --label frappe-ast,miss \
      --title "frappe-ast: <one line: what the tool got wrong>" --body-file <file>
    ```
    Write it as a plain bug report. Use bench-relative paths (`apps/crm/...`), not home-directory paths, and add no tool or model attribution.
