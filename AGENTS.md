@@ -12,13 +12,14 @@ records.py     <module>/<kind>/<name>/<name>.json for Report, Page, Web Form, Nu
   python/      stdlib ast: analyzer.py, checks.py (FA1xx), hooks.py (static evaluator), frappe_api.py (API tables),
                custom_fields.py (create_custom_fields shapes)
   js/          tree-sitter: analyzer.py (walker), nodes.py (node readers), frappe_patterns.py (API tables),
-               desk.py (frm field calls, JS controller classes, cscript, realtime), ts_types.py (TS types, *Props),
+               desk.py (frm field calls, frm.call targets, JS controller classes, cscript, realtime),
+               form_setup.py (shared form code: setup functions, namespaces, `new X({frm})`), ts_types.py (TS types, *Props),
                frappe_ui.py (useDoc / useDoctype / v2 URLs -> "<DocType>:<method>"), client_api.py (frappe.client.*
                DocTypes, field refs), constants.py (method paths in constants), vue.py (SFC split, props/emits/slots)
 doctype_json.py DocType JSON -> doctypes (settings as flags), fields, permissions, doctype_links (connections, actions, states)
 indexer.py     incremental: (mtime, size) per file; a hash of this package's source forces a full reparse
 store.py       SQLite schema; bump SCHEMA_VERSION when you change a table
-queries/       resolver.py (dotted paths, re-exports, base classes), method, doctype + doctype_schema, impact, check (FX2xx),
+queries/       resolver.py (dotted paths, re-exports, base classes), method + doc_calls (the Python method a frm.call runs), contexts (which forms shared desk JS runs on), doctype + doctype_schema, impact, check (FX2xx),
                doc_checks (FX204, FX207), forms (which form a JS file serves, load order, JS class chain),
                form (`form` command), record (`record` command, FX208), lookup, outline, component + component_api (Vue components across
                apps and frappe-ui), apps (required_apps, frontends)
@@ -32,7 +33,7 @@ commands/      one Command class per subcommand (base, index, code, reports, rev
 - A Frappe API pattern is a row in a table: `python/frappe_api.py` or `js/frappe_patterns.py`. Add rows there, not `if` branches in the walkers.
 - A rule gets a stable id (FA1xx per file, FX2xx cross file), a line in its module docstring (`check --list-rules` prints those docstrings), and a fixture case. A rule never changes meaning; retire the id instead.
 - Patterns come from real code. Before you add one, find it in `~/projects/frappe-ui` (the library source) and in the crm, helpdesk, lms or gameplan frontends on maintain-bench, and keep the shape the apps actually write.
-- Ref targets: `doc_method` / `module_method` are `x` when the DocType comes from the file's folder (frm.call) and `<DocType>:x` when the call names it. `field` is `<DocType>.<field>`. `custom_field` has the field as target and the DocType as `via`. `method_const` is a constant's name, matched to `const` symbols in the same app. `form_field` is `field` or `table.field` (`*.field` for add_fetch) with no DocType: queries resolve the form from the file (`queries/forms.py`). `script_field` is a name the file defines itself. `form_controller` is the JS class a form installs as `frm.cscript`, and `cscript_event` is a handler assigned to `frm.cscript`. `realtime` carries `publish` (Python) or `listen` (JS) as access. `record_link` is `<kind>:<name>`.
+- Ref targets: `doc_method` / `module_method` are `x` when the DocType is the form's (frm.call; `queries/contexts.py` finds the form), `<DocType>:x` when the call names it, and `?:x` for a doc of a DocType the code does not name. `setup_event` is `<tag>:<event>` for frappe.ui.form.on with a DocType that is not a literal (`@self`, `@self Item`, or `$` for the setup function's first parameter), `setup_call` is a DocType literal passed to an app function (via is the function), and `js_new` is a class an app creates with `new`. `field` is `<DocType>.<field>`. `custom_field` has the field as target and the DocType as `via`. `method_const` is a constant's name, matched to `const` symbols in the same app. `form_field` is `field` or `table.field` (`*.field` for add_fetch) with no DocType: queries resolve the form from the file (`queries/forms.py`). `script_field` is a name the file defines itself. `form_controller` is the JS class a form installs as `frm.cscript`, and `cscript_event` is a handler assigned to `frm.cscript`. `realtime` carries `publish` (Python) or `listen` (JS) as access. `record_link` is `<kind>:<name>`.
 - Desk semantics come from frappe's own code: `frappe/desk/form/meta.py` (script load order) and `frappe/public/js/frappe/form/script_manager.js` (handler order). Read them on the bench before you change `queries/forms.py` or `queries/form.py`.
 - Library units (`frappe-ui@...`) are indexed for lookup, never checked, and their tests are not indexed.
 - Output is for agents: one line per fact, `path:line` first, no empty sections. Every query must stay useful at `--limit 5`.

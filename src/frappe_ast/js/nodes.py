@@ -125,3 +125,57 @@ def registry_key(left: Node, registry: str) -> str:
 			return string(node.child_by_field_name("index"))
 		node = node.child_by_field_name("object")
 	return ""
+
+
+def enclosing_params(node: Node) -> list[str]:
+	"""Parameter names of the nearest function around `node`."""
+	parent = node.parent
+	while parent is not None and parent.type not in (
+		*FUNCTION_TYPES,
+		"method_definition",
+		"function_declaration",
+	):
+		parent = parent.parent
+	if parent is None:
+		return []
+	found = parent.child_by_field_name("parameters") or parent.child_by_field_name("parameter")
+	if found is None:
+		return []
+	if found.type == "identifier":
+		return [text(found)]
+	names = (
+		c.child_by_field_name("left") if c.type == "assignment_pattern" else c for c in found.named_children
+	)
+	return [text(c) for c in names if c is not None and c.type == "identifier"]
+
+
+def binding(node: Node, name: str) -> tuple[str, Node | None] | None:
+	"""("param", function) or ("var", initial value) for the nearest binding of `name` around `node`."""
+	parent = node.parent
+	while parent is not None:
+		if parent.type in (*FUNCTION_TYPES, "method_definition", "function_declaration"):
+			if name in enclosing_params(_first_child(parent)):
+				return "param", parent
+			value = _declared(parent.child_by_field_name("body"), name)
+			if value is not None:
+				return "var", value
+		parent = parent.parent
+	return None
+
+
+def _first_child(fn: Node) -> Node:
+	"""A node inside `fn`, so enclosing_params(...) reads fn's own parameters."""
+	return fn.child_by_field_name("body") or fn
+
+
+def _declared(body: Node | None, name: str) -> Node | None:
+	"""Initial value of `var/let/const name = ...` in `body`, not inside nested functions."""
+	stack = [body] if body is not None else []
+	while stack:
+		node = stack.pop()
+		if node.type == "variable_declarator" and text(node.child_by_field_name("name")) == name:
+			return node.child_by_field_name("value") or node
+		stack += [
+			c for c in node.named_children if c.type not in (*FUNCTION_TYPES, "function_declaration", "class")
+		]
+	return None

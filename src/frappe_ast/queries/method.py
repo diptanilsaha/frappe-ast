@@ -1,7 +1,6 @@
 """`frappe-ast method <dotted>`: everything that defines, exposes or calls a server method."""
 
-from pathlib import PurePath
-
+from frappe_ast.queries.doc_calls import DocCalls
 from frappe_ast.queries.resolver import Resolver
 from frappe_ast.store import Store
 
@@ -24,6 +23,7 @@ class MethodTrace:
 			}
 		qualname = symbol["qualname"]
 		names = sorted({dotted, qualname})
+		client_calls, maybe_client_calls = DocCalls(self.store, self.resolver).trace(symbol)
 		return {
 			"query": dotted,
 			"found": True,
@@ -34,7 +34,8 @@ class MethodTrace:
 			"python_callers": self._python_callers(qualname),
 			"maybe_callers": self._maybe_callers(symbol),
 			"string_refs": self._string_refs(names),
-			"client_calls": self._client_calls(symbol),
+			"client_calls": client_calls[: self.limit],
+			"maybe_client_calls": maybe_client_calls[: self.limit],
 			"constant_calls": self._constant_calls(names),
 			"callees": self._callees(qualname),
 		}
@@ -85,24 +86,6 @@ class MethodTrace:
 			*names,
 		)
 		return _dedupe_lines(rows)[: self.limit]
-
-	def _client_calls(self, symbol: dict) -> list[dict]:
-		"""frm.call("x") next to the controller, and frappe-ui calls that name "<DocType>:x"."""
-		kind = {"method": "doc_method", "function": "module_method"}.get(symbol["kind"])
-		doctype = self.resolver.doctype_for_file(symbol["path"])
-		if not kind or not doctype:
-			return []
-		folder = str(PurePath(symbol["path"]).parent)
-		return self.store.rows(
-			"select f.path, r.line, r.via, r.scope from refs r join files f on f.id = r.file_id "
-			"where r.kind = ? and ((r.target = ? and f.path like ?) or r.target = ?) "
-			"order by f.path, r.line limit ?",
-			kind,
-			symbol["name"],
-			folder + "/%",
-			f"{doctype}:{symbol['name']}",
-			self.limit,
-		)
 
 	def _constant_calls(self, names: list[str]) -> list[dict]:
 		"""call(API.get) where API.get = "<this method>" is a constant in another file of the app."""

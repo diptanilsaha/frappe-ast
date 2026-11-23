@@ -20,8 +20,11 @@ URL_OPTION_CALLS = {"createListResource", "createDocumentResource", "useList", "
 DOC_METHOD_CALLS = {"frm.call", "this.frm.call", "cur_frm.call", "me.frm.call", "frm.doc.call"}
 # frappe.call({method: "x", doc}) sends cmd=run_doc_method (frappe/public/js/frappe/request.js).
 DOC_OPTION_CALLS = {"frappe.call"}
-# The form's own doc. Another doc (`doc: connected_app`) runs a method of its own DocType.
-FORM_DOCS = {"doc", "frm.doc", "me.frm.doc", "this.frm.doc", "cur_frm.doc"}
+# The form's own doc. A `doc` parameter is one too, unless it is a callback's (`.then((doc) => ...)`).
+# Another doc runs a method of its own DocType: "X:m" when a local `frappe.get_doc("X")` names it,
+# else "?:m" (`doc: connected_app`), which queries treat as unknown.
+FORM_DOCS = {"frm.doc", "me.frm.doc", "this.frm.doc", "cur_frm.doc"}
+DOC_GETTERS = {"frappe.get_doc", "frappe.model.get_doc", "frappe.model.get_new_doc"}
 
 # Calls whose first argument, or `doctype` key, is a DocType name. Value is access kind.
 DOCTYPE_CALLS = {
@@ -146,5 +149,7 @@ CHILD_FIELD_CALLS = {"set_query"}
 CONTROLLER_CALLS = {"cur_frm.script_manager.make", "frm.script_manager.make", "this.frm.script_manager.make"}
 CSCRIPT_EXTENDS = {"extend_cscript", "$.extend", "jQuery.extend", "Object.assign"}
 CSCRIPT_OBJECTS = {"cur_frm.cscript", "frm.cscript", "this.frm.cscript", "me.frm.cscript"}
+# frappe.ui.form.on(this.frm.doctype, ...) in shared code: the form the code runs on (js/form_setup.py).
+FORM_SELF = {f"{form}.{doc}doctype" for form in FORM_OBJECTS for doc in ("", "doc.")}
 # Server -> browser events. Python publishes with frappe.publish_realtime.
 REALTIME_LISTEN = {"frappe.realtime.on", "frappe.realtime.off"}

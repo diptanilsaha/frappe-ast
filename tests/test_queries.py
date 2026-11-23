@@ -26,6 +26,24 @@ def test_method_trace_follows_reexport(store):
 	assert [c["path"] for c in trace["client_calls"]] == [TASK_JS, "apps/demo/frontend/src/data/tasks.ts"]
 
 
+def test_method_trace_shared_desk_js(store):
+	# this.frm.call in a JS class that demo_task.js installs as frm.cscript, on a base-class method.
+	archive = MethodTrace(store).run("demo.controllers.base_document.BaseDocument.archive")
+	assert [c["scope"] for c in archive["client_calls"]] == [
+		"demo.BaseController.setup.form:@self",  # frappe.ui.form.on(this.frm.doctype) in the class
+		"demo.BaseController.archive",
+		"demo.setup.task_triggers.form:$.note",  # setup function, called with "Demo Task"
+		"demo.utils.close",  # $.extend(demo.utils) helper, called from the form
+		"demo.Notes.save",  # class the form creates with `new demo.Notes({frm})`
+	]
+	# A helper nothing calls, and a doc from a callback: the DocType is unknown, so only a maybe.
+	finish = MethodTrace(store).run("demo.demo.doctype.demo_task.demo_task.DemoTask.finish")
+	assert [c["scope"] for c in finish["maybe_client_calls"]] == ["form:Demo Task.onload", "demo.mark_done"]
+	assert not MethodTrace(store).run("demo.demo.doctype.demo_task.demo_task.DemoTask.private_helper")[
+		"maybe_client_calls"
+	]
+
+
 def test_method_trace_api_url(store):
 	make = MethodTrace(store).run("demo.api.make")
 	assert [r["via"] for r in make["string_refs"] if r["path"] == TASK_JS] == ["url", "url", "url"]

@@ -54,6 +54,37 @@ def test_form_report_runs_in_desk_order(store):
 	assert not any("helper_not_an_event" in line for line in summary)
 
 
+def test_js_shared_form_setups(bench_root):
+	facts = JsAnalyzer({"demo"}).analyze(BASE_JS, (bench_root / BASE_JS).read_text(), "js")
+	names = {s.qualname for s in facts.symbols}
+	assert {"demo.setup.task_triggers", "demo.utils.close", "demo.Notes.save"} <= names
+	events = {(r.kind, r.target) for r in facts.refs if r.kind in ("setup_event", "form_event")}
+	assert events == {
+		("setup_event", "@self:cost"),
+		("form_event", "Demo Note:title"),
+		("setup_event", "$:note"),
+	}
+	task = JsAnalyzer({"demo"}).analyze(TASK_JS, (bench_root / TASK_JS).read_text(), "js")
+	assert ("setup_call", "Demo Task", "demo.setup.task_triggers") in {
+		(r.kind, r.target, r.via) for r in task.refs
+	}
+	assert ("js_new", "demo.Notes") in {(r.kind, r.target) for r in task.refs}
+	assert ("form_event", "Demo Task:cost") in {(r.kind, r.target) for r in task.refs}
+
+
+def test_form_report_shared_setups(store):
+	# 3-arg frappe.ui.form.on in the form script, then frappe.ui.form.on(this.frm.doctype) in its JS class.
+	cost = FormReport(store).run("Demo Task", "cost")["runs"]
+	assert [r.rsplit(":", 1)[0].split("  ")[-1] for r in cost] == [TASK_JS, BASE_JS]
+	# demo.setup.task_triggers("Demo Task") registers frappe.ui.form.on(doctype, {note}).
+	assert [r.split("  ")[-1] for r in FormReport(store).run("Demo Task", "note")["runs"]][0].startswith(
+		BASE_JS
+	)
+	# The JS class registers a handler on the child table while it runs on the form.
+	title = FormReport(store).run("Demo Task", "title")["runs"]
+	assert title[0].startswith('[Demo Note.title, table items] on("Demo Note")') and BASE_JS in title[0]
+
+
 def test_desk_field_and_record_checks(store):
 	got = {(f["rule"], f["message"]) for f in Checker(store, {"demo"}).run(rules={"FX207", "FX208"})}
 	desk = {m for r, m in got if r == "FX207" and "(custom" in m and "Demo Task" in m}

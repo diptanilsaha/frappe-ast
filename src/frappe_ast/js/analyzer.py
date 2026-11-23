@@ -11,6 +11,7 @@ from frappe_ast.js import frappe_patterns as fp
 from frappe_ast.js import nodes as n
 from frappe_ast.js.client_api import DocTypeData
 from frappe_ast.js.desk import DeskRefs
+from frappe_ast.js.form_setup import FormSetups
 from frappe_ast.js.frappe_ui import DocMethodRefs
 from frappe_ast.js.nodes import FUNCTION_TYPES
 from frappe_ast.js.ts_types import TypeSymbols
@@ -54,6 +55,7 @@ class _Walker(TypeSymbols):
 		self.ui = DocMethodRefs(self._ref)
 		self.data = DocTypeData(self._ref)
 		self.desk = DeskRefs(self._ref)
+		self.setup = FormSetups(self._ref, known_apps)
 
 	def walk(self, node: Node, scope: list[str]):
 		handler = getattr(self, f"_on_{node.type}", None)
@@ -111,6 +113,9 @@ class _Walker(TypeSymbols):
 						self.desk.on_report(right, key, scope)
 					return [*scope, f"{kind}:{key}"]
 		self.desk.on_assignment(left_text, right, node, scope)
+		namespace = self.setup.namespace(left_text, right)
+		if namespace:
+			return namespace
 		if (
 			right is not None
 			and left.type == "member_expression"
@@ -157,30 +162,27 @@ class _Walker(TypeSymbols):
 		self.facts.calls.append(Call(self._scope_name(scope), callee, "", self._line(node)))
 		args = n.arguments(node)
 		if callee in fp.FORM_EVENT_CALLS:
-			return self._form_events(node, args, scope)
+			return self.setup.on_form_on(node, args, scope)
 		self._server_call(callee, args, node, scope)
 		self._doctype_call(callee, args, node, scope)
 		self.ui.on_call(callee, func, args, node, scope)
 		self.desk.on_call(callee, args, node, scope)
+		self.setup.on_call(callee, args, node, scope)
 		if callee.endswith("frm.trigger") and args:
 			self._ref("form_trigger", n.string(args[0]), callee, node, scope, "call")
+		if callee in fp.CSCRIPT_EXTENDS and len(args) > 1:
+			return self.setup.namespace(n.compact(n.text(args[0])), args[1])
 		return None
 
-	def _form_events(self, node, args, scope):
-		doctype = n.string(args[0]) if args else ""
-		if not doctype:
-			return None
-		self._ref("doctype", doctype, "frappe.ui.form.on", node, scope, "form")
-		for handlers in (a for a in args[1:] if a.type == "object"):
-			for event, value in n.object_members(handlers):
-				self._ref("form_event", f"{doctype}:{event}", "frappe.ui.form.on", value, scope, "handler")
-		return [*scope, f"form:{doctype}"]
+	def _on_new_expression(self, node, scope):
+		self.setup.on_new(node, scope)
+		return None
 
 	def _server_call(self, callee, args, node, scope):
 		if not args:
 			return
 		if callee in fp.DOC_METHOD_CALLS or callee.endswith(".frm.call"):
-			self._frm_call(callee, args[0], node, scope)
+			self.desk.on_doc_call(callee, args[0], node, scope)
 			return
 		if callee in fp.URL_OPTION_CALLS:
 			self._method_path(callee, n.object_get(args[0], "url"), scope)
@@ -188,8 +190,8 @@ class _Walker(TypeSymbols):
 		if callee not in fp.SERVER_CALLS:
 			return
 		first = args[0]
-		if callee in fp.DOC_OPTION_CALLS and n.compact(n.text(n.object_get(first, "doc"))) in fp.FORM_DOCS:
-			self._frm_call(callee, first, node, scope)
+		if callee in fp.DOC_OPTION_CALLS and n.object_get(first, "doc") is not None:
+			self.desk.on_doc_call(callee, first, node, scope)
 			return
 		# `method` may be an HTTP verb ("POST") next to `url`; keep the first path-like value.
 		for candidate in (first, n.object_get(first, "method"), n.object_get(first, "url")):
@@ -214,22 +216,6 @@ class _Walker(TypeSymbols):
 		if name:
 			self._ref("method_const", name, callee, candidate, scope, "call")
 		return ""
-
-	def _frm_call(self, callee, first, node, scope):
-		"""frm.call("x") and frm.call({doc, method: "x"}) run Document method x.
-		Without `doc`, an undotted name is a function in the controller module."""
-		if n.string(first):
-			self._ref("doc_method", n.string(first), callee, node, scope, "call")
-			return
-		method = n.string(n.object_get(first, "method"))
-		if not method:
-			return
-		if "." in method:
-			self._ref("method", method, callee, node, scope, "call")
-		elif n.object_get(first, "doc") is not None:
-			self._ref("doc_method", method, callee, node, scope, "call")
-		else:
-			self._ref("module_method", method, callee, node, scope, "call")
 
 	def _dotted(self, value, node, scope):
 		"""A dotted path, or an "/api/method/<dotted>" URL (open_url_post, window.open, href)."""

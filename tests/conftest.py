@@ -86,10 +86,10 @@ def install():
 
 CONTROLLER = """
 import frappe
-from frappe.model.document import Document
+from demo.controllers.base_document import BaseDocument
 
 
-class DemoTask(Document):
+class DemoTask(BaseDocument):
 	def validate(self):
 		self.set_title()
 
@@ -130,7 +130,9 @@ frappe.ui.form.on("Demo Task", {
 frappe.listview_settings["Demo Task"] = { add_fields: ["status"] };
 
 demo.TaskController = class TaskController extends demo.BaseController {
-	status(doc) {}
+	status(doc) {
+		frappe.call({ method: "finish", doc: doc });
+	}
 	helper_not_an_event() {}
 };
 cur_frm.script_manager.make(demo.TaskController);
@@ -154,19 +156,78 @@ frappe.ui.form.on("Demo Task", {
 	onload(frm) {
 		frappe.call({ method: "finish", doc: frm.doc });
 		frappe.call({ method: "authorize", doc: connected_app });
+		get_doc().then((doc) => frappe.call({ method: "finish", doc: doc }));
+		const note = frappe.get_doc("Demo Note");
+		frappe.call({ method: "finish", doc: note });
 		open_url_post("/api/method/demo.api.make", { x: 1 });
 		window.open("/api/method/demo.api.make?x=" + frm.doc.name);
 		window.location.href = `/api/method/demo.api.make?x=${frm.doc.name}`;
 		fetch("/api/method/demo.api.open_tasks");
 	},
 });
+
+demo.setup.task_triggers("Demo Task");
+// "color" is a custom field the app ships (fixtures/custom_field.json): not an FX205.
+frappe.ui.form.on("Demo Task", "color", () => {});
+frappe.ui.form.on("Demo Task", "cost", (frm) => {
+	demo.utils.close(frm);
+	new demo.Notes({ frm });
+});
 """
 
 DESK_BASE_JS = """
 demo.BaseController = class BaseController extends frappe.ui.form.Controller {
+	setup() {
+		frappe.ui.form.on(this.frm.doctype, "cost", (frm) => frm.call("archive"));
+		frappe.ui.form.on("Demo Note", "title", () => {});
+	}
 	refresh(doc) {}
 	status(doc) {}
+	archive() {
+		this.frm.call("archive");
+	}
 };
+
+demo.mark_done = function (frm) {
+	frm.call("finish");
+	frm.call("private_helper");
+};
+
+demo.setup = {
+	task_triggers(doctype) {
+		frappe.ui.form.on(doctype, {
+			note(frm) {
+				frm.call("archive");
+			},
+		});
+	},
+};
+
+$.extend(demo.utils, {
+	close(frm) {
+		frm.call("archive");
+	},
+});
+
+demo.Notes = class Notes {
+	constructor(opts) {
+		this.frm = opts.frm;
+	}
+	save() {
+		this.frm.call("archive");
+	}
+};
+"""
+
+BASE_DOCUMENT = """
+import frappe
+from frappe.model.document import Document
+
+
+class BaseDocument(Document):
+	@frappe.whitelist()
+	def archive(self):
+		pass
 """
 
 REPORT_PY = """
@@ -306,6 +367,8 @@ def bench_root(tmp_path_factory) -> Path:
 		"apps/demo/demo/demo/doctype/demo_task/demo_task.json": json.dumps(TASK_JSON),
 		"apps/demo/demo/demo/doctype/demo_note/demo_note.json": json.dumps(NOTE_ITEM_JSON),
 		"apps/demo/demo/public/js/base_controller.js": DESK_BASE_JS,
+		"apps/demo/demo/controllers/__init__.py": "",
+		"apps/demo/demo/controllers/base_document.py": BASE_DOCUMENT,
 		"apps/demo/demo/demo/report/open_tasks/open_tasks.json": json.dumps(REPORT_JSON),
 		"apps/demo/demo/demo/report/open_tasks/open_tasks.py": REPORT_PY,
 		"apps/demo/demo/demo/report/open_tasks/open_tasks.js": REPORT_JS,

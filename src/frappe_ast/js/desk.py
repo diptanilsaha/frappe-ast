@@ -42,6 +42,23 @@ class DeskRefs:
 		elif callee in fp.REALTIME_LISTEN:
 			self.ref("realtime", n.string(args[0]), callee, node, scope, "listen")
 
+	def on_doc_call(self, callee: str, first: Node, node: Node, scope: list[str]):
+		"""frm.call("x"), frm.call({doc, method: "x"}) and frappe.call({doc, method: "x"}) run
+		Document method x. Without `doc`, an undotted name is a function in the controller module."""
+		if n.string(first):
+			self.ref("doc_method", n.string(first), callee, node, scope, "call")
+			return
+		method = n.string(n.object_get(first, "method"))
+		doc = n.object_get(first, "doc")
+		if not method:
+			return
+		if "." in method:
+			self.ref("method", method, callee, node, scope, "call")
+		elif doc is not None:
+			self.ref("doc_method", _doc_target(doc) + method, callee, node, scope, "call")
+		else:
+			self.ref("module_method", method, callee, node, scope, "call")
+
 	def on_member(self, node: Node, scope: list[str]):
 		"""frm.doc.status and frm.fields_dict.items: a field of the form's DocType."""
 		obj, prop = node.child_by_field_name("object"), node.child_by_field_name("property")
@@ -123,3 +140,19 @@ def _names(value: Node):
 	elif value.type == "object":
 		for key, member in n.object_members(value):
 			yield key, member
+
+
+def _doc_target(doc: Node) -> str:
+	"""Target prefix for `doc: <doc>`: "" for the form's doc, "X:" or "?:" for another doc."""
+	value = n.compact(n.text(doc))
+	if value in fp.FORM_DOCS:
+		return ""
+	bound = n.binding(doc, value) if doc.type == "identifier" else None
+	if bound is not None and bound[0] == "param":
+		return "" if value == "doc" and bound[1].parent.type != "arguments" else "?:"
+	if bound is not None and bound[1] is not None and bound[1].type == "call_expression":
+		getter = n.compact(n.text(bound[1].child_by_field_name("function")))
+		args = n.arguments(bound[1])
+		if getter in fp.DOC_GETTERS and args and n.string(args[0]):
+			return n.string(args[0]) + ":"
+	return "?:"

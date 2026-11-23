@@ -26,17 +26,24 @@ class FormScripts:
 		self.store = store
 		self.resolver = resolver or Resolver(store)
 		self._hooked: dict[str, list[str]] | None = None
+		self._file_doctypes: dict[str, list[str]] = {}
 
 	def doctypes_for_file(self, path: str) -> list[str]:
 		"""The forms `frm` can be in this file: folder, then hooks, then frappe.ui.form.on."""
+		if path not in self._file_doctypes:
+			self._file_doctypes[path] = self._doctypes_for_file(path)
+		return self._file_doctypes[path]
+
+	def _doctypes_for_file(self, path: str) -> list[str]:
 		own = self.resolver.doctype_for_file(path)
 		hooked = self.hooked().get(path, [])
 		if own or hooked:
 			return [d for d in [own, *hooked] if d]
+		# `+r.kind` keeps SQLite on the file index: this file has few refs, the bench has many.
 		rows = self.store.rows(
-			"select distinct r.target from refs r join files f on f.id = r.file_id "
-			"join doctypes d on d.name = r.target where f.path = ? and r.kind = 'doctype' "
-			"and r.via = 'frappe.ui.form.on' and d.flags not like '%\"istable\": 1%'",
+			"select distinct r.target from refs r where r.file_id = (select id from files where path = ?) "
+			"and +r.kind = 'doctype' and r.via = 'frappe.ui.form.on' and r.target in "
+			"(select name from doctypes where flags not like '%\"istable\": 1%')",
 			path,
 		)
 		return [r["target"] for r in rows]

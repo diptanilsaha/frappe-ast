@@ -117,7 +117,7 @@ class Checker:
 		for row in rows:
 			doctype, _, event = row["target"].partition(":")
 			if doctype not in fields_cache:
-				fields_cache[doctype] = self._fieldnames(doctype)
+				fields_cache[doctype] = self.doc.fieldnames(doctype)
 			fields = fields_cache[doctype]
 			if fields is None or event in FORM_EVENTS or event in fields or event in triggers:
 				continue
@@ -136,13 +136,6 @@ class Checker:
 				msg = f"{hook['app']} requires {needed}, which is not in this bench; calls into it are not checked"
 				out.append(_finding("FX206", "warning", msg, path, hook["line"]))
 		return out
-
-	def _fieldnames(self, doctype: str) -> set[str] | None:
-		if not self.resolver.doctype(doctype):
-			return None
-		return {
-			r["fieldname"] for r in self.store.rows("select fieldname from fields where doctype = ?", doctype)
-		}
 
 	def _overridden(self, target: str) -> bool:
 		return bool(

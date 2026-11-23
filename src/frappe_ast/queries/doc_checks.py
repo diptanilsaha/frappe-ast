@@ -40,7 +40,7 @@ class DocTypeClientChecks:
 			cls = self.resolver.controller_class(doctype) if doctype else None
 			if cls is None or "." in method:
 				continue
-			found, complete = self._find_doc_method(doctype["name"], cls, method)
+			found, complete = self.find_doc_method(doctype["name"], cls, method)
 			if found is None and complete:
 				out.append(_fx204(f"{cls['name']} has no method {method}", row))
 			elif found is not None and not found["whitelisted"]:
@@ -54,7 +54,7 @@ class DocTypeClientChecks:
 		for row in self.store.rows(REF_ROWS, "field", prefix + "%"):
 			doctype, _, field = row["target"].rpartition(".")
 			if doctype not in known:
-				known[doctype] = self._fieldnames(doctype)
+				known[doctype] = self.fieldnames(doctype)
 			fields = known[doctype]
 			if fields is None or field in fields or field in STANDARD_FIELDS:
 				continue
@@ -107,11 +107,42 @@ class DocTypeClientChecks:
 		"""Fields of any of these DocTypes; None when one of them is not indexed (cannot judge)."""
 		fields: set[str] = set()
 		for doctype in doctypes:
-			known = self._fieldnames(doctype)
+			known = self.fieldnames(doctype)
 			if known is None:
 				return None
 			fields |= known
 		return fields if doctypes else None
+
+	def find_doc_method(self, doctype: str, cls: dict, name: str) -> tuple[dict | None, bool]:
+		"""Search the controller, then classes other apps swap in or mix in via hooks."""
+		classes = [cls]
+		for hook in self.store.rows(
+			"select value from hooks where key in ('override_doctype_class', 'extend_doctype_class') and p1 = ?",
+			doctype,
+		):
+			extra = self.resolver.symbol(hook["value"])
+			if extra is None:
+				return None, False
+			classes.append(extra)
+		complete = True
+		for candidate in classes:
+			method, candidate_complete = self.resolver.find_method(candidate, name)
+			if method is not None:
+				return method, True
+			complete = complete and candidate_complete
+		return None, complete
+
+	def fieldnames(self, doctype: str) -> set[str] | None:
+		"""Declared fields plus custom fields any app ships; None when the DocType is not indexed."""
+		if not self.resolver.doctype(doctype):
+			return None
+		rows = self.store.rows(
+			"select fieldname from fields where doctype = ? union select target from refs "
+			"where kind = 'custom_field' and via = ?",
+			doctype,
+			doctype,
+		)
+		return {r["fieldname"] for r in rows}
 
 	def _module_methods(self, prefix: str) -> list[dict]:
 		"""frm.call({method: "x"}) without `doc`, and useDoctype(X).runMethod, call <controller module>.x."""
@@ -131,37 +162,6 @@ class DocTypeClientChecks:
 	def _split(self, row: dict) -> tuple[str, str]:
 		doctype, _, method = row["target"].rpartition(":")
 		return doctype or self.resolver.doctype_for_file(row["path"]) or "", method
-
-	def _find_doc_method(self, doctype: str, cls: dict, name: str) -> tuple[dict | None, bool]:
-		"""Search the controller, then classes other apps swap in or mix in via hooks."""
-		classes = [cls]
-		for hook in self.store.rows(
-			"select value from hooks where key in ('override_doctype_class', 'extend_doctype_class') and p1 = ?",
-			doctype,
-		):
-			extra = self.resolver.symbol(hook["value"])
-			if extra is None:
-				return None, False
-			classes.append(extra)
-		complete = True
-		for candidate in classes:
-			method, candidate_complete = self.resolver.find_method(candidate, name)
-			if method is not None:
-				return method, True
-			complete = complete and candidate_complete
-		return None, complete
-
-	def _fieldnames(self, doctype: str) -> set[str] | None:
-		"""Declared fields plus custom fields any app ships; None when the DocType is not indexed."""
-		if not self.resolver.doctype(doctype):
-			return None
-		rows = self.store.rows(
-			"select fieldname from fields where doctype = ? union select target from refs "
-			"where kind = 'custom_field' and via = ?",
-			doctype,
-			doctype,
-		)
-		return {r["fieldname"] for r in rows}
 
 
 def controller_module(json_path: str) -> str:

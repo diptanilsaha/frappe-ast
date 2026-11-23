@@ -9,6 +9,7 @@ and the parent form's cscript method of the same name.
 from collections import Counter
 from pathlib import PurePath
 
+from frappe_ast.queries.contexts import FormContexts
 from frappe_ast.queries.forms import FormScripts, is_event_name
 from frappe_ast.queries.resolver import Resolver
 from frappe_ast.store import Store
@@ -17,6 +18,7 @@ from frappe_ast.store import Store
 class FormReport:
 	def __init__(self, store: Store, limit: int = 20):
 		self.store = store
+		self.shared: list[dict] = []
 		self.resolver = Resolver(store)
 		self.forms = FormScripts(store, self.resolver)
 		self.limit = limit
@@ -26,6 +28,8 @@ class FormReport:
 		if record is None:
 			return {"query": name, "found": False}
 		doctype = record["name"]
+		# Handlers that shared code (public/js setup functions, JS classes) registers on this form.
+		self.shared = FormContexts(self.store, self.resolver, self.forms).registrations(doctype)
 		scripts = self.forms.scripts(doctype)
 		controllers = self.forms.controllers(doctype)
 		chain = self.forms.chain(controllers[0]["target"]) if controllers else []
@@ -107,7 +111,13 @@ class FormReport:
 			f"where r.kind = 'form_event' and r.target like ?{path_sql} order by f.path, r.line",
 			*params,
 		)
-		return [{**r, "event": r["target"].split(":", 1)[1]} for r in rows]
+		prefix = params[0].removesuffix("%")
+		shared = [
+			r
+			for r in self.shared
+			if r["target"] == params[0] or (not event and r["target"].startswith(prefix))
+		]
+		return [{**r, "event": r["target"].split(":", 1)[1]} for r in [*rows, *shared]]
 
 	def _assigned(self, name: str, scripts: list[str]) -> list[str]:
 		return [f"{r['path']}:{r['line']}" for r in self._assigned_rows(scripts) if r["target"] == name]

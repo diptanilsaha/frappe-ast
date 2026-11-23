@@ -26,6 +26,21 @@ def test_python_whitelist_imports_and_doctype_refs(bench_root):
 	assert "demo.api.validate_any" in refs(facts, "method")
 
 
+def test_python_module_imports_win_over_type_checking_blocks():
+	source = (
+		"from demo.utils import Note\n\n\n"
+		"class Task(Note):\n"
+		"\tfrom typing import TYPE_CHECKING\n\n"
+		"\tif TYPE_CHECKING:\n"
+		"\t\tfrom demo.demo.doctype.note.note import Note\n"
+	)
+	facts = PythonAnalyzer(APPS).analyze("demo/task.py", source, "demo.task")
+	# The base class is the module-level Note, not the child-table type a generated block imports.
+	assert {s.qualname: s.signature for s in facts.symbols if s.kind == "alias"}[
+		"demo.task.Note"
+	] == "demo.utils.Note"
+
+
 def test_python_relative_import_in_package():
 	source = "from . import utils\nfrom .sub import thing\n"
 	facts = PythonAnalyzer(APPS).analyze("demo/pkg/__init__.py", source, "demo.pkg")
@@ -73,7 +88,13 @@ def test_js_form_events_and_calls(bench_root):
 	path = bench_root / "apps/demo/demo/demo/doctype/demo_task/demo_task.js"
 	facts = JsAnalyzer(APPS).analyze(str(path), path.read_text(), "js")
 	assert "Demo Task:refresh" in refs(facts, "form_event")
-	assert refs(facts, "doc_method") == {"finish", "private_helper"}
+	assert refs(facts, "doc_method") == {
+		"finish",
+		"private_helper",
+		"?:authorize",
+		"?:finish",
+		"Demo Note:finish",
+	}
 	assert refs(facts, "module_method") == {"close_task", "no_such_function"}
 	assert {"demo.api.open_tasks", "demo.api.not_exposed", "demo.api.gone"} <= refs(facts, "method")
 	assert refs(facts, "listview") == {"Demo Task"}
@@ -83,10 +104,17 @@ def test_js_form_events_and_calls(bench_root):
 def test_js_frappe_call_with_doc_and_api_urls(bench_root):
 	path = bench_root / "apps/demo/demo/demo/doctype/demo_task/demo_task.js"
 	facts = JsAnalyzer(APPS).analyze(str(path), path.read_text(), "js")
-	# frappe.call({method, doc: frm.doc}) runs a method of the form's controller, like frm.call.
-	# `doc: connected_app` is another DocType's doc, so it makes no ref.
-	doc_calls = [r.target for r in facts.refs if r.kind == "doc_method" and r.via == "frappe.call"]
-	assert doc_calls == ["finish"]
+	# frappe.call({method, doc}) runs a Document method, like frm.call. The form's doc (frm.doc, or a
+	# `doc` parameter of a class method) has no prefix. Another doc is "X:" when a local
+	# frappe.get_doc("X") names it, else "?:" (`doc: connected_app`, a `.then((doc) => ...)` callback).
+	doc_calls = [(r.line, r.target) for r in facts.refs if r.kind == "doc_method" and r.via == "frappe.call"]
+	assert [t for _, t in sorted(doc_calls)] == [
+		"finish",
+		"finish",
+		"?:authorize",
+		"?:finish",
+		"Demo Note:finish",
+	]
 	# A whole /api/method URL, also with a query string or as a template, is a dotted ref.
 	urls = [r.via for r in facts.refs if r.kind == "dotted" and r.target == "demo.api.make"]
 	assert urls == ["url", "url", "url"]
