@@ -4,6 +4,7 @@ import json
 from collections import Counter
 
 from frappe_ast.python.frappe_api import LIFECYCLE_METHODS
+from frappe_ast.queries.doctype_schema import DoctypeSchema
 from frappe_ast.queries.forms import FormScripts
 from frappe_ast.queries.resolver import SYMBOL_COLS, Resolver
 from frappe_ast.render import short_scope
@@ -28,6 +29,7 @@ class DoctypeReport:
 	def __init__(self, store: Store, limit: int = 20):
 		self.store = store
 		self.resolver = Resolver(store)
+		self.json_schema = DoctypeSchema(store)
 		self.limit = limit
 
 	def run(self, name: str, with_fields: bool = False) -> dict:
@@ -44,7 +46,9 @@ class DoctypeReport:
 			"query": name,
 			"found": True,
 			"definition": {**doctype, "flags": json.loads(doctype["flags"])},
-			"schema": self._schema(name, with_fields),
+			"schema": self.json_schema.schema(name, with_fields),
+			"permissions": self.json_schema.permissions(name),
+			**self.json_schema.links(name),
 			"controller": self._controller(doctype),
 			"hooks": self._hooks(name),
 			"form_events": self._form_events(name),
@@ -57,24 +61,6 @@ class DoctypeReport:
 			"client_fields": self._client_fields(name),
 		}
 		return report
-
-	def _schema(self, name: str, with_fields: bool) -> dict:
-		fields = self.store.rows("select * from fields where doctype = ? order by idx", name)
-		data_fields = [f for f in fields if f["fieldname"]]
-		schema = {
-			"field_count": len(data_fields),
-			"by_type": dict(Counter(f["fieldtype"] for f in data_fields).most_common()),
-			"links": [f"{f['fieldname']} -> {f['options']}" for f in data_fields if f["fieldtype"] == "Link"],
-			"child_tables": [
-				f"{f['fieldname']} -> {f['options']}"
-				for f in data_fields
-				if f["fieldtype"] in ("Table", "Table MultiSelect")
-			],
-			"mandatory": [f["fieldname"] for f in data_fields if '"reqd": 1' in f["attrs"]],
-		}
-		if with_fields:
-			schema["fields"] = [_field_line(f) for f in data_fields]
-		return schema
 
 	def _controller(self, doctype: dict) -> dict:
 		cls = self.resolver.controller_class(doctype)
@@ -205,24 +191,6 @@ class DoctypeReport:
 	def _similar(self, name: str) -> list[str]:
 		rows = self.store.rows("select name from doctypes where name like ? limit 10", f"%{name}%")
 		return [r["name"] for r in rows]
-
-
-def _field_line(f: dict) -> str:
-	attrs = json.loads(f["attrs"])
-	flags = [k for k in ("reqd", "read_only", "hidden", "unique", "allow_on_submit") if attrs.get(k)]
-	cond = {
-		k: attrs[k]
-		for k in ("depends_on", "mandatory_depends_on", "read_only_depends_on", "fetch_from")
-		if k in attrs
-	}
-	text = f"{f['fieldname']} {f['fieldtype']}"
-	if f["options"]:
-		text += f"[{f['options'][:60]}]"
-	if flags:
-		text += " " + ",".join(flags)
-	if cond:
-		text += " " + " ".join(f"{k}={v}" for k, v in cond.items())
-	return text
 
 
 def _ref_line(r: dict) -> str:

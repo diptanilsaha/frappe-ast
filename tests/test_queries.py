@@ -47,6 +47,21 @@ def test_doctype_report(store):
 	assert "Demo Task.items (Table)" in DoctypeReport(store).run("Demo Note")["linked_from"]
 
 
+def test_doctype_report_json_schema(store):
+	report = DoctypeReport(store).run("Demo Task", with_fields=True)
+	assert report["definition"]["flags"]["search_fields"] == "status"
+	assert report["permissions"] == [
+		"System Manager level 0: read write",
+		"Demo User level 0 if_owner: read create",
+		"System Manager level 1: read write",
+	]
+	assert report["schema"]["permlevels"] == {"1": "cost"}
+	assert "cost Currency set_only_once default=0 permlevel=1" in report["schema"]["fields"]
+	assert report["connections"] == ["Demo Note.task [Notes]"]
+	assert report["actions"] == ["Close: Server Action demo.api.close"]
+	assert report["states"] == ["Open (Blue)"]
+
+
 def test_cross_checks(store):
 	findings = Checker(store, {"demo", "frappe"}).run()
 	got = {(f["rule"], f["message"]) for f in findings}

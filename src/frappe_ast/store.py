@@ -8,7 +8,7 @@ from pathlib import Path
 
 from frappe_ast.model import FileFacts
 
-SCHEMA_VERSION = "4"
+SCHEMA_VERSION = "5"
 SCHEMA = """
 create table if not exists meta (key text primary key, value text);
 create table if not exists files (
@@ -32,6 +32,12 @@ create table if not exists doctypes (name text, app text, module text, path text
 create table if not exists fields (
 	doctype text, idx integer, fieldname text, fieldtype text, label text, options text, attrs text
 );
+create table if not exists permissions (
+	doctype text, idx integer, role text, permlevel integer, if_owner integer, rights text
+);
+create table if not exists doctype_links (
+	doctype text, kind text, target text, value text, grp text, extra text
+);
 create index if not exists ix_sym_qual on symbols(qualname);
 create index if not exists ix_sym_name on symbols(name);
 create index if not exists ix_sym_file on symbols(file_id);
@@ -44,8 +50,13 @@ create index if not exists ix_findings_file on findings(file_id);
 create index if not exists ix_hooks_value on hooks(value);
 create index if not exists ix_fields_dt on fields(doctype);
 create index if not exists ix_fields_opt on fields(options);
+create index if not exists ix_perms_dt on permissions(doctype);
+create index if not exists ix_perms_role on permissions(role);
+create index if not exists ix_dtlinks_dt on doctype_links(doctype);
+create index if not exists ix_dtlinks_target on doctype_links(kind, target);
 """
 FACT_TABLES = ("symbols", "calls", "refs", "findings")
+DOCTYPE_TABLES = ("fields", "permissions", "doctype_links")
 
 
 class Store:
@@ -96,10 +107,7 @@ class Store:
 
 	def replace_app_meta(self, app: str, hooks: list, doctypes: list):
 		self.db.execute("delete from hooks where app = ?", (app,))
-		self.db.execute(
-			"delete from fields where doctype in (select name from doctypes where app = ?)", (app,)
-		)
-		self.db.execute("delete from doctypes where app = ?", (app,))
+		self._delete_doctypes("app = ?", [app])
 		self.db.executemany(
 			"insert into hooks values (?,?,?,?,?,?,?)",
 			[(h.app, h.key, *_pad(h.path, 3), h.value, h.line) for h in hooks],
@@ -113,6 +121,17 @@ class Store:
 				"insert into fields values (?,?,?,?,?,?,?)",
 				[_field_row(dt.name, i, f) for i, f in enumerate(dt.fields)],
 			)
+			self.db.executemany(
+				"insert into permissions values (?,?,?,?,?,?)",
+				[
+					(dt.name, i, p["role"], p["permlevel"], p["if_owner"], " ".join(p["rights"]))
+					for i, p in enumerate(dt.permissions)
+				],
+			)
+			self.db.executemany(
+				"insert into doctype_links values (?,?,?,?,?,?)",
+				[(dt.name, x["kind"], x["target"], x["value"], x["group"], x["extra"]) for x in dt.links],
+			)
 
 	def drop_apps_except(self, apps: list[str]):
 		"""Forget apps (and library labels) that are no longer in the bench."""
@@ -122,11 +141,7 @@ class Store:
 		]:
 			self.delete_file(path)
 		self.db.execute(f"delete from hooks where app not in ({marks})", apps)
-		self.db.execute(
-			f"delete from fields where doctype in (select name from doctypes where app not in ({marks}))",
-			apps,
-		)
-		self.db.execute(f"delete from doctypes where app not in ({marks})", apps)
+		self._delete_doctypes(f"app not in ({marks})", apps)
 
 	def set_meta(self, key: str, value: str):
 		self.db.execute("insert or replace into meta values (?, ?)", (key, value))
@@ -137,6 +152,13 @@ class Store:
 
 	def commit(self):
 		self.db.commit()
+
+	def _delete_doctypes(self, where: str, params: list):
+		for table in DOCTYPE_TABLES:
+			self.db.execute(
+				f"delete from {table} where doctype in (select name from doctypes where {where})", params
+			)
+		self.db.execute(f"delete from doctypes where {where}", params)
 
 	def _insert_facts(self, file_id: int, facts: FileFacts):
 		self.db.executemany(
@@ -174,12 +196,15 @@ class Store:
 		)
 
 	def _migrate(self):
-		self.db.executescript(SCHEMA)
+		self.db.execute("create table if not exists meta (key text primary key, value text)")
 		if self.get_meta("schema") != SCHEMA_VERSION:
-			for table in ("files", *FACT_TABLES, "hooks", "doctypes", "fields"):
-				self.db.execute(f"delete from {table}")
-			self.set_meta("schema", SCHEMA_VERSION)
-			self.commit()
+			# Drop, not delete: `create table if not exists` keeps an old table's columns.
+			for table in ("files", *FACT_TABLES, "hooks", "doctypes", *DOCTYPE_TABLES):
+				self.db.execute(f"drop table if exists {table}")
+			self.db.execute("delete from meta")
+		self.db.executescript(SCHEMA)
+		self.set_meta("schema", SCHEMA_VERSION)
+		self.commit()
 
 
 def _pad(path: tuple, size: int) -> list[str]:

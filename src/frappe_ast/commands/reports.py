@@ -25,7 +25,11 @@ class DoctypeCommand(Command):
 
 	def arguments(self, p):
 		p.add_argument("name")
-		p.add_argument("--fields", action="store_true", help="list every field with flags and depends_on")
+		p.add_argument(
+			"--fields",
+			action="store_true",
+			help="list every field with flags, depends_on, permlevel and defaults",
+		)
 
 	def run(self, ctx, args):
 		ctx.render.emit(DoctypeReport(ctx.store(), args.limit).run(args.name, args.fields))

@@ -15,10 +15,10 @@ records.py     <module>/<kind>/<name>/<name>.json for Report, Page, Web Form, Nu
                desk.py (frm field calls, JS controller classes, cscript, realtime), ts_types.py (TS types, *Props),
                frappe_ui.py (useDoc / useDoctype / v2 URLs -> "<DocType>:<method>"), client_api.py (frappe.client.*
                DocTypes, field refs), constants.py (method paths in constants), vue.py (SFC split, props/emits/slots)
-doctype_json.py DocType JSON -> doctypes/fields rows
+doctype_json.py DocType JSON -> doctypes (settings as flags), fields, permissions, doctype_links (connections, actions, states)
 indexer.py     incremental: (mtime, size) per file; a hash of this package's source forces a full reparse
 store.py       SQLite schema; bump SCHEMA_VERSION when you change a table
-queries/       resolver.py (dotted paths, re-exports, base classes), method, doctype, impact, check (FX2xx),
+queries/       resolver.py (dotted paths, re-exports, base classes), method, doctype + doctype_schema, impact, check (FX2xx),
                doc_checks (FX204, FX207), forms (which form a JS file serves, load order, JS class chain),
                form (`form` command), record (`record` command, FX208), lookup, outline, component + component_api (Vue components across
                apps and frappe-ui), apps (required_apps, frontends)

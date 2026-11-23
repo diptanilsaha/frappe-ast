@@ -260,12 +260,22 @@ TASK_JSON = {
 	"name": "Demo Task",
 	"module": "Demo",
 	"is_submittable": 1,
+	"search_fields": "status",
+	"sort_field": "creation",
 	"fields": [
 		{"fieldname": "status", "fieldtype": "Select", "options": "Open\nClosed", "reqd": 1},
 		{"fieldname": "note", "fieldtype": "Link", "options": "Demo Note", "depends_on": "eval:doc.status"},
 		{"fieldname": "items", "fieldtype": "Table", "options": "Demo Note"},
+		{"fieldname": "cost", "fieldtype": "Currency", "permlevel": 1, "set_only_once": 1, "default": "0"},
 	],
-	"permissions": [{"role": "System Manager", "read": 1, "write": 1}],
+	"permissions": [
+		{"role": "System Manager", "read": 1, "write": 1},
+		{"role": "Demo User", "read": 1, "create": 1, "if_owner": 1},
+		{"role": "System Manager", "permlevel": 1, "read": 1, "write": 1},
+	],
+	"links": [{"link_doctype": "Demo Note", "link_fieldname": "task", "group": "Notes"}],
+	"actions": [{"label": "Close", "action": "demo.api.close", "action_type": "Server Action"}],
+	"states": [{"title": "Open", "color": "Blue"}],
 }
 
 
