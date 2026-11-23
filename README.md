@@ -14,6 +14,21 @@ Frappe joins code through strings and conventions, not imports. A whitelisted me
 
 It runs on Python 3.11 and later, so it installs next to a v15 bench. It still reads v16 code, which is written for 3.14. The index is at `~/.cache/frappe-ast/<bench>-<hash>.sqlite`. Each query re-reads only the files that changed.
 
+## What it handles
+
+- **Server calls from Python:** imports, re-exports through a package `__init__`, `frappe.enqueue`, `frappe.get_attr`, and `/api/method/...` URLs in strings and f-strings.
+- **Server calls from desk JS:** `frappe.call`, `frappe.xcall`, `frm.call`, `frappe.call({doc})`, `run_doc_method`, page methods (`{module, page, method}`), and `/api/method/...` URLs.
+- **Method paths that code builds:** constants, `this.x` properties and local variables (`${METHOD}.x`, `prefix + "x"`), and functions that pass a method name through (`api("get_x")`).
+- **Frontend calls:** frappe-ui (`createResource`, `useCall`, `useDoc`, `useDoctype`, `createListResource`, v2 URLs), handles imported from another file, method paths in Vue template props, and frappe-react-sdk.
+- **DocType controller methods:** the form's own controller, its base classes, `override_doctype_class`, `extend_doctype_class`, and Button fields whose `options` name a method.
+- **Desk forms:** the scripts each app loads in desk order, `frappe.ui.form.on` handlers, the JS controller class chain, and shared `public/js` code that installs itself on forms (setup functions, `@self` handlers, `$.extend` helpers, classes made with `new`).
+- **Hooks:** `doc_events`, `scheduler_events`, `override_whitelisted_methods`, `regional_overrides` and the rest, including keys that `hooks.py` computes.
+- **Monkey patches:** `module.f = g`, `Class.m = g`, `setattr(...)`, wrappers such as frappe's recorder on `Document.run_method`, and patches on `frappe.db`.
+- **DocTypes and records:** fields, permissions, connections, actions and states from JSON, custom fields that apps ship, and Report, Page, Web Form and Number Card records.
+- **frappe-ui copies:** the version each frontend builds against, and the props, emits and slots of each component in that copy.
+- **Checks:** hook paths that do not resolve, calls to missing or not whitelisted methods, unknown fields, missing `required_apps`, broken records, and patches on functions that no longer exist.
+- **Diffs:** the symbols a change touches, and their callers, hooks and patches.
+
 ## Use
 
 ```sh
