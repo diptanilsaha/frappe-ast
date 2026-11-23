@@ -149,6 +149,17 @@ frappe.ui.form.on("Demo Task", {
 		frappe.realtime.on("task_done", () => {});
 	},
 });
+
+frappe.ui.form.on("Demo Task", {
+	onload(frm) {
+		frappe.call({ method: "finish", doc: frm.doc });
+		frappe.call({ method: "authorize", doc: connected_app });
+		open_url_post("/api/method/demo.api.make", { x: 1 });
+		window.open("/api/method/demo.api.make?x=" + frm.doc.name);
+		window.location.href = `/api/method/demo.api.make?x=${frm.doc.name}`;
+		fetch("/api/method/demo.api.open_tasks");
+	},
+});
 """
 
 DESK_BASE_JS = """

@@ -104,3 +104,24 @@ def pattern(node: Node) -> str:
 		elif child.type not in ("`",):
 			parts.append(text(child))
 	return "".join(parts)
+
+
+def heritage(cls: Node) -> str:
+	"""`(erpnext.TransactionController)` for `class X extends erpnext.TransactionController`."""
+	clause = next((c for c in cls.named_children if c.type == "class_heritage"), None)
+	if clause is None:
+		return ""
+	return "(" + compact(text(clause)).removeprefix("extends").split("implements")[0] + ")"
+
+
+def registry_key(left: Node, registry: str) -> str:
+	"""The key of `registry["X"]`, also inside `frappe.pages["x"].on_page_load`."""
+	node = left
+	while node is not None and node.type in ("member_expression", "subscript_expression"):
+		if (
+			node.type == "subscript_expression"
+			and compact(text(node.child_by_field_name("object"))) == registry
+		):
+			return string(node.child_by_field_name("index"))
+		node = node.child_by_field_name("object")
+	return ""

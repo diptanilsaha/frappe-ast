@@ -26,6 +26,11 @@ def test_method_trace_follows_reexport(store):
 	assert [c["path"] for c in trace["client_calls"]] == [TASK_JS, "apps/demo/frontend/src/data/tasks.ts"]
 
 
+def test_method_trace_api_url(store):
+	make = MethodTrace(store).run("demo.api.make")
+	assert [r["via"] for r in make["string_refs"] if r["path"] == TASK_JS] == ["url", "url", "url"]
+
+
 def test_method_trace_override(store):
 	trace = MethodTrace(store).run("demo.api.get_count")
 	assert any(r["path"].endswith("Tasks.vue") for r in trace["string_refs"])
@@ -115,6 +120,7 @@ def test_frappe_ui_calls_reach_the_method_trace(store):
 	finish = MethodTrace(store).run("demo.demo.doctype.demo_task.demo_task.DemoTask.finish")
 	assert {(c["path"].rsplit("/", 1)[-1], c["via"]) for c in finish["client_calls"]} == {
 		("demo_task.js", "frm.call"),
+		("demo_task.js", "frappe.call"),
 		("tasks.ts", "runDocMethod"),
 		("tasks.ts", "useDoc"),
 	}

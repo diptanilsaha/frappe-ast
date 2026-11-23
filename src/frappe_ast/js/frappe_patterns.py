@@ -18,6 +18,10 @@ SERVER_CALLS = {
 URL_OPTION_CALLS = {"createListResource", "createDocumentResource", "useList", "useDoc"}
 # frm.call("method") runs a whitelisted method on the form's controller.
 DOC_METHOD_CALLS = {"frm.call", "this.frm.call", "cur_frm.call", "me.frm.call", "frm.doc.call"}
+# frappe.call({method: "x", doc}) sends cmd=run_doc_method (frappe/public/js/frappe/request.js).
+DOC_OPTION_CALLS = {"frappe.call"}
+# The form's own doc. Another doc (`doc: connected_app`) runs a method of its own DocType.
+FORM_DOCS = {"doc", "frm.doc", "me.frm.doc", "this.frm.doc", "cur_frm.doc"}
 
 # Calls whose first argument, or `doctype` key, is a DocType name. Value is access kind.
 DOCTYPE_CALLS = {
@@ -60,6 +64,9 @@ REGISTRIES = {
 }
 
 _API_PREFIX = re.compile(r"^/?api/(v2/)?method/")
+# A string that is a whole /api/method URL; "/api/method/" + name is not. Not checked by FX202:
+# a URL can be a prefix that the code concatenates ("api/method/<module>" + ".x").
+API_URL_RE = re.compile(r"^/?api/(v2/)?method/[\w.]+(\?.*)?$")
 
 
 def normalize_method(path: str) -> str:

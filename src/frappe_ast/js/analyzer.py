@@ -73,7 +73,7 @@ class _Walker(TypeSymbols):
 		if node.parent is not None and node.parent.type == "assignment_expression":
 			return None  # `erpnext.x.Y = class extends Z {}`: named after its target, below
 		name = n.text(node.child_by_field_name("name"))
-		return self._symbol(node, name, "class", scope, signature=_heritage(node))
+		return self._symbol(node, name, "class", scope, signature=n.heritage(node))
 
 	_on_class = _on_class_declaration
 
@@ -104,7 +104,7 @@ class _Walker(TypeSymbols):
 		left_text = n.compact(n.text(left))
 		for registry, kind in fp.REGISTRIES.items():
 			if left_text.startswith(registry + "["):
-				key = _registry_key(left, registry)
+				key = n.registry_key(left, registry)
 				if key:
 					self._ref(kind, key, registry, node, scope, "register")
 					if kind == "report":
@@ -116,7 +116,7 @@ class _Walker(TypeSymbols):
 			and left.type == "member_expression"
 			and right.type in ("class", "class_expression")
 		):
-			return self._symbol(node, left_text, "class", [], qualname=left_text, signature=_heritage(right))
+			return self._symbol(node, left_text, "class", [], qualname=left_text, signature=n.heritage(right))
 		if right is not None and right.type in FUNCTION_TYPES and left.type == "member_expression":
 			return self._symbol(node, left_text, "function", [], qualname=left_text)
 		return None
@@ -132,14 +132,15 @@ class _Walker(TypeSymbols):
 		return None
 
 	def _on_template_string(self, node, scope):
-		self.ui.on_url(n.pattern(node), node, scope)
+		value = n.pattern(node)
+		self.ui.on_url(value, node, scope)
+		self._dotted(value, node, scope)
 		return None
 
 	def _on_string(self, node, scope):
 		value = n.string(node)
 		self.ui.on_url(value, node, scope)
-		if DOTTED_RE.match(value) and value.split(".")[0] in self.known_apps:
-			self._ref("dotted", value, "string", node, scope, "call")
+		self._dotted(value, node, scope)
 		return None
 
 	# Calls
@@ -187,6 +188,9 @@ class _Walker(TypeSymbols):
 		if callee not in fp.SERVER_CALLS:
 			return
 		first = args[0]
+		if callee in fp.DOC_OPTION_CALLS and n.compact(n.text(n.object_get(first, "doc"))) in fp.FORM_DOCS:
+			self._frm_call(callee, first, node, scope)
+			return
 		# `method` may be an HTTP verb ("POST") next to `url`; keep the first path-like value.
 		for candidate in (first, n.object_get(first, "method"), n.object_get(first, "url")):
 			method = self._method_path(callee, candidate, scope)
@@ -226,6 +230,13 @@ class _Walker(TypeSymbols):
 			self._ref("doc_method", method, callee, node, scope, "call")
 		else:
 			self._ref("module_method", method, callee, node, scope, "call")
+
+	def _dotted(self, value, node, scope):
+		"""A dotted path, or an "/api/method/<dotted>" URL (open_url_post, window.open, href)."""
+		via = "url" if fp.API_URL_RE.match(value) else "string"
+		path = fp.normalize_method(value) if via == "url" else value
+		if DOTTED_RE.match(path) and path.split(".")[0] in self.known_apps:
+			self._ref("dotted", path, via, node, scope, "call")
 
 	def _doctype_call(self, callee, args, node, scope):
 		if not args:
@@ -271,24 +282,3 @@ class _Walker(TypeSymbols):
 
 	def _line(self, node: Node) -> int:
 		return node.start_point[0] + 1 + self.offset
-
-
-def _heritage(cls: Node) -> str:
-	"""`(erpnext.TransactionController)` for `class X extends erpnext.TransactionController`."""
-	heritage = next((c for c in cls.named_children if c.type == "class_heritage"), None)
-	if heritage is None:
-		return ""
-	return "(" + n.compact(n.text(heritage)).removeprefix("extends").split("implements")[0] + ")"
-
-
-def _registry_key(left: Node, registry: str) -> str:
-	"""The key of `registry["X"]`, also inside `frappe.pages["x"].on_page_load`."""
-	node = left
-	while node is not None and node.type in ("member_expression", "subscript_expression"):
-		if (
-			node.type == "subscript_expression"
-			and n.compact(n.text(node.child_by_field_name("object"))) == registry
-		):
-			return n.string(node.child_by_field_name("index"))
-		node = node.child_by_field_name("object")
-	return ""

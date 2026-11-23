@@ -80,6 +80,21 @@ def test_js_form_events_and_calls(bench_root):
 	assert refs(facts, "form_trigger") == {"recalculate"}
 
 
+def test_js_frappe_call_with_doc_and_api_urls(bench_root):
+	path = bench_root / "apps/demo/demo/demo/doctype/demo_task/demo_task.js"
+	facts = JsAnalyzer(APPS).analyze(str(path), path.read_text(), "js")
+	# frappe.call({method, doc: frm.doc}) runs a method of the form's controller, like frm.call.
+	# `doc: connected_app` is another DocType's doc, so it makes no ref.
+	doc_calls = [r.target for r in facts.refs if r.kind == "doc_method" and r.via == "frappe.call"]
+	assert doc_calls == ["finish"]
+	# A whole /api/method URL, also with a query string or as a template, is a dotted ref.
+	urls = [r.via for r in facts.refs if r.kind == "dotted" and r.target == "demo.api.make"]
+	assert urls == ["url", "url", "url"]
+	assert {"dotted", "method"} == {
+		r.kind for r in facts.refs if r.target == "demo.api.open_tasks" and r.via in ("url", "fetch")
+	}
+
+
 def test_vue_resources_and_template(bench_root):
 	path = bench_root / "apps/demo/frontend/src/pages/Tasks.vue"
 	js = JsAnalyzer(APPS)
