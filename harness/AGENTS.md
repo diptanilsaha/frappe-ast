@@ -8,7 +8,7 @@ This bench holds Frappe apps under `apps/<app>/`. Python runs on the server; des
 
 ```sh
 frappe-ast <command> [args] [--json] [--limit N]
-# not on PATH: uv run --project ~/benches/frappe-ast frappe-ast ...
+# not on PATH: uv run --project ~/benches/frappe-ai-toolchains/frappe-ast frappe-ast ...
 ```
 
 The tool finds the bench by walking up from the cwd. Each query first refreshes the index for changed files (under a second). The first run builds the full index in about 10 s. Paths in the output are relative to the bench root, as `path:line`.

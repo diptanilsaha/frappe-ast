@@ -25,15 +25,15 @@ To pin a version, add `@<branch, tag or commit>` to the URL, for example `...fra
 From a local checkout, when you work on the tool itself (code changes take effect without a reinstall):
 
 ```sh
-uv tool install --editable ~/benches/frappe-ast
+uv tool install --editable ~/benches/frappe-ai-toolchains/frappe-ast
 ```
 
-Without any install, use `uv run --project ~/benches/frappe-ast frappe-ast ...`.
+Without any install, use `uv run --project ~/benches/frappe-ai-toolchains/frappe-ast frappe-ast ...`.
 
 Then link the bench agent guide into each bench root. This makes AGENTS.md and CLAUDE.md symlinks, and skips any that already exist:
 
 ```sh
-~/benches/frappe-ast/harness/install.sh ~/benches/bench16 ~/benches/bench15
+~/benches/frappe-ai-toolchains/frappe-ast/harness/install.sh ~/benches/bench16 ~/benches/bench15
 ```
 
 ## Use
