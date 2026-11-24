@@ -4,10 +4,14 @@ from frappe_ast.commands.base import Context
 from frappe_ast.commands.code import (
 	CalleesCommand,
 	CallersCommand,
+	EdgesCommand,
 	FindCommand,
 	OutlineCommand,
+	PathsCommand,
+	ReachCommand,
 	RefsCommand,
 	SqlCommand,
+	SurfaceCommand,
 )
 from frappe_ast.commands.index import IndexCommand, StatusCommand
 from frappe_ast.commands.reports import (
@@ -35,6 +39,10 @@ COMMANDS = {
 	"record": RecordCommand(),
 	"callers": CallersCommand(),
 	"callees": CalleesCommand(),
+	"edges": EdgesCommand(),
+	"paths": PathsCommand(),
+	"surface": SurfaceCommand(),
+	"reach": ReachCommand(),
 	"refs": RefsCommand(),
 	"endpoints": EndpointsCommand(),
 	"hooks": HooksCommand(),

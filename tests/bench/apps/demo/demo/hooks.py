@@ -10,3 +10,7 @@ required_apps = ["frappe/missing_app"]
 doctype_js = {"Demo Note": "public/js/note.js"}
 scheduler_events = {"daily": ["demo.api.daily"]}
 regional_overrides = {"India": {"demo.api.open_tasks": "demo.overrides.our_make"}}
+permission_query_conditions = {"Demo Task": "demo.dispatch.task_query"}
+before_request = ["demo.dispatch.check_request"]
+jinja = {"methods": ["demo.dispatch.format_task"]}
+after_install = "demo.dispatch.setup"

@@ -1,45 +1,58 @@
 # frappe-ast
 
-frappe-ast indexes a Frappe bench and answers questions about how its code connects.
+A static index of a Frappe bench that answers how its code connects, built for humans and AI agents.
 
-## The problem
+Frappe joins code through strings and conventions: desk JS calls a method by its dotted path, `hooks.py` runs code by name, and another app can override or patch a function at run time. Grep finds the text, but not who calls a method or what runs when a document saves. frappe-ast resolves both, without running app code.
 
-Frappe joins code through strings and conventions, not imports. A whitelisted method is called from JS as `frappe.call("app.api.x")`, as `frm.call("x")`, or from a frappe-ui resource. `hooks.py` and DocType JSON run other code by name. Another app can override a function, extend a controller class, or patch it at run time. So grep cannot tell you who calls a method or what runs when a document is saved. An agent that changes the code misses callers and breaks them.
+Using an agent? Run `harness/install.sh ~/benches/<bench>`. It links `harness/AGENTS.md` into the bench, the guide that tells agents which query answers which question.
 
-## How it works
+```sh
+cd ~/benches/<bench>
+frappe-ast method erpnext.selling.doctype.quotation.quotation.make_sales_order  # every caller, override and hook
+frappe-ast doctype "Sales Invoice"            # controller, doc_events from every app, schema, client code
+frappe-ast form "Sales Order" item_code       # the handlers a field change runs, in desk order
+frappe-ast edges erpnext.controllers.stock_controller.StockController.validate   # what it makes run
+frappe-ast reach frappe.utils.response.send_private_file   # every route from an entry point to it
+frappe-ast check apps/erpnext                 # dead hooks, missing methods, unknown fields
+frappe-ast impact --base origin/develop       # what a diff touches, and who depends on it
+```
 
-1. It parses every app in the bench: Python with the stdlib `ast`, JS, TS and Vue with tree-sitter, and `hooks.py` and DocType JSON as data. It never runs app code.
-2. It writes the facts to a SQLite index: symbols, calls, the references that Frappe APIs make, hooks, DocTypes and fields.
-3. Queries join those facts across files and apps, and print one line per fact, `path:line` first.
-
-It runs on Python 3.11 and later, so it installs next to a v15 bench. It still reads v16 code, which is written for 3.14. The index is at `~/.cache/frappe-ast/<bench>-<hash>.sqlite`. Each query re-reads only the files that changed.
-
-## What it handles
-
-- **Server calls from Python:** imports, re-exports through a package `__init__`, `frappe.enqueue`, `frappe.get_attr`, and `/api/method/...` URLs in strings and f-strings.
-- **Server calls from desk JS:** `frappe.call`, `frappe.xcall`, `frm.call`, `frappe.call({doc})`, `run_doc_method`, page methods (`{module, page, method}`), and `/api/method/...` URLs.
-- **Method paths that code builds:** constants, `this.x` properties and local variables (`${METHOD}.x`, `prefix + "x"`), and functions that pass a method name through (`api("get_x")`).
-- **Frontend calls:** frappe-ui (`createResource`, `useCall`, `useDoc`, `useDoctype`, `createListResource`, v2 URLs), handles imported from another file, method paths in Vue template props, and frappe-react-sdk.
-- **DocType controller methods:** the form's own controller, its base classes, `override_doctype_class`, `extend_doctype_class`, and Button fields whose `options` name a method.
-- **Desk forms:** the scripts each app loads in desk order, `frappe.ui.form.on` handlers, the JS controller class chain, and shared `public/js` code that installs itself on forms (setup functions, `@self` handlers, `$.extend` helpers, classes made with `new`).
-- **Hooks:** `doc_events`, `scheduler_events`, `override_whitelisted_methods`, `regional_overrides` and the rest, including keys that `hooks.py` computes.
-- **Monkey patches:** `module.f = g`, `Class.m = g`, `setattr(...)`, wrappers such as frappe's recorder on `Document.run_method`, and patches on `frappe.db`.
-- **DocTypes and records:** fields, permissions, connections, actions and states from JSON, custom fields that apps ship, and Report, Page, Web Form and Number Card records.
-- **frappe-ui copies:** the version each frontend builds against, and the props, emits and slots of each component in that copy.
-- **Checks:** hook paths that do not resolve, calls to missing or not whitelisted methods, unknown fields, missing `required_apps`, broken records, and patches on functions that no longer exist.
-- **Diffs:** the symbols a change touches, and their callers, hooks and patches.
-
-## Use
+## Install
 
 ```sh
 uv tool install "git+https://github.com/diptanilsaha/frappe-ast.git"
-cd ~/benches/<bench>
-frappe-ast method erpnext.selling.doctype.quotation.quotation.make_sales_order   # who calls it, what replaces it
-frappe-ast doctype "Sales Invoice"        # controller, hooks, schema, client code
-frappe-ast form "Sales Order" item_code   # what runs in the desk form, in load order
-frappe-ast check apps/erpnext             # broken hooks, calls, fields and patches
-frappe-ast impact --base origin/develop   # what a diff touches
-frappe-ast --help
 ```
 
-To link the agent guide into a bench, run `harness/install.sh ~/benches/<bench>`. `harness/AGENTS.md` is the guide for agents that work in a bench. `AGENTS.md` is the guide for agents that work on this tool.
+It runs on Python 3.11 and later and reads v15, v16 and develop benches.
+
+## How it works
+
+It parses Python with `ast`, JS, TS and Vue with tree-sitter, and `hooks.py` and DocType JSON as data, into a SQLite index at `~/.cache/frappe-ast/`. The first run indexes the bench in seconds; after that each query re-reads only the files that changed. Queries join the facts across files and apps.
+
+## Output
+
+- One line per fact, `path:line` first, paths relative to the bench root.
+- `--json` for code that filters the output; `--limit N` caps rows per section.
+- `--bench` picks the bench (default: the nearest one above the current directory); `--no-refresh` skips the index refresh.
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `method <dotted>` | Definition, overrides, patches, hooks, Python callers and client calls (`frappe.call`, `frm.call`, frappe-ui, URLs, Button fields). |
+| `callers` / `callees` | Python calls into or out of a symbol, resolved through imports and re-exports. |
+| `edges <fn>` / `paths <from> <to>` | The call graph: inherited and overriding methods, constructors, document lifecycle, `doc_events`, hook dispatch, functions passed to `frappe.enqueue`. |
+| `surface` / `reach <fn>` | Functions that requests, pages, documents, hooks and jobs run directly, and the route from each to a function. |
+| `doctype <name>` | Controller and its bases, `doc_events`, overrides, schema, links and the client code that names its fields. |
+| `form <DocType> [field]` | A desk form's scripts from every app, its JS controller chain, and the handlers per event. |
+| `record <name>` | A standard Report, Page, Web Form, Print Format, ... with the code beside its JSON. |
+| `component <name>` | A Vue component in an app or its frappe-ui copy: props, emits, slots, usages. |
+| `refs <target>` | References to a DocType, field, component, form event, realtime event or import. |
+| `find` / `outline` | Symbol definitions by name or glob; the symbols of one file. |
+| `hooks` / `endpoints` / `apps` | Hook entries folded across apps; whitelisted methods; apps, `required_apps` and frontends. |
+| `check [path]` | Frappe-aware rules: dead hook paths, missing methods, unknown fields, broken records, stale patches. |
+| `impact --base <ref>` | Symbols a diff touches, with their callers, hooks and patches. |
+| `sql <query>` | Read-only SQL over the index. |
+| `index` / `status` | Build or refresh the index; where it is and how fresh. |
+
+`frappe-ast <command> --help` lists each command's options. `AGENTS.md` is the guide for agents that work on this tool.

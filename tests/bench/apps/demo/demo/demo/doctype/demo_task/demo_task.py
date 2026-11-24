@@ -16,6 +16,9 @@ class DemoTask(BaseDocument):
 	def private_helper(self):
 		pass
 
+	def retire(self):
+		self.archive()
+
 
 @frappe.whitelist()
 def close_task(name):
