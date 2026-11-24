@@ -209,7 +209,7 @@ class RefsCommand(Command):
 
 
 class SqlCommand(Command):
-	help = "read-only SQL over the index (tables: files symbols calls refs findings hooks doctypes fields permissions doctype_links)"
+	help = "read-only SQL over the index (tables: files symbols calls refs flows findings hooks doctypes fields permissions doctype_links)"
 
 	def arguments(self, p):
 		p.add_argument("query")
