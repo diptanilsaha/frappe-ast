@@ -29,6 +29,11 @@ class Call:
 	callee: str  # callee text as written, e.g. "frappe.get_doc"
 	resolved: str  # best-effort absolute dotted target, "" when unknown
 	line: int
+	# What the call is made on, when the code says: "doctype:<DocType>" for a document from
+	# frappe.get_doc and friends ("doctype:?" when the DocType is not a literal), "call:<dotted>"
+	# for the result of calling <dotted> (an instance, when <dotted> is a class). "" otherwise.
+	receiver: str = ""
+	arg: str = ""  # the first positional argument when it is a string literal
 
 
 @dataclass

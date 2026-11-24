@@ -5,16 +5,18 @@ import re
 
 from frappe_ast.model import Call, FileFacts, Ref, Symbol
 from frappe_ast.python import compat, custom_fields
-from frappe_ast.python.astutil import dotted, truthy
+from frappe_ast.python.astutil import dotted, literal_text, short_literal, truthy
 from frappe_ast.python.checks import PythonChecks
 from frappe_ast.python.frappe_api import (
 	API_URL_RE,
+	DOC_LOADER_APIS,
 	DOCTYPE_APIS,
 	DOTTED_APIS,
 	REALTIME_APIS,
 	doctype_arg,
 	realtime_event,
 )
+from frappe_ast.python.imports import ImportMap, annotation_types
 from frappe_ast.python.patches import PatchRefs
 
 DOTTED_RE = re.compile(r"^[a-z_][a-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*){2,}$")
@@ -39,10 +41,25 @@ class PythonAnalyzer:
 		facts.findings = PythonChecks(imports).run(tree)
 		return facts
 
-	def _aliases(self, tree: ast.Module, imports: "ImportMap", module: str) -> list[Symbol]:
+	def _aliases(self, tree: ast.Module, imports: ImportMap, module: str) -> list[Symbol]:
 		"""Module-level `from x import y` makes `module.y` a valid dotted path (re-export)."""
 		aliases = []
 		for node in tree.body:
+			if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+				types = annotation_types(node.annotation, imports, module)
+				if types:
+					name = node.target.id
+					aliases.append(
+						Symbol(
+							name,
+							f"{module}.{name}",
+							"variable",
+							node.lineno,
+							node.lineno,
+							signature="|".join(types),
+						)
+					)
+				continue
 			if (
 				isinstance(node, ast.Assign)
 				and len(node.targets) == 1
@@ -71,55 +88,6 @@ class PythonAnalyzer:
 		return aliases
 
 
-class ImportMap:
-	"""Map local names to absolute dotted paths, from imports and module-level defs."""
-
-	def __init__(self, module: str, is_package: bool = False):
-		self.module = module
-		self.is_package = is_package
-		self.names: dict[str, str] = {}
-
-	@classmethod
-	def from_tree(cls, tree: ast.Module, module: str, is_package: bool = False) -> "ImportMap":
-		imports = cls(module, is_package)
-		# Module-level imports win: a class's `if TYPE_CHECKING:` block (in every generated DocType
-		# controller) can import a child-table class that has the same name as a module-level base.
-		nested = [n for n in ast.walk(tree) if isinstance(n, ast.Import | ast.ImportFrom)]
-		for node in [*_module_level_imports(tree.body), *nested]:
-			for local, target in imports._bindings(node):
-				imports.names.setdefault(local, target)
-		for node in tree.body:
-			if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
-				imports.names.setdefault(node.name, f"{module}.{node.name}")
-		return imports
-
-	def _bindings(self, node: ast.Import | ast.ImportFrom):
-		if isinstance(node, ast.Import):
-			for alias in node.names:
-				local = alias.asname or alias.name.split(".")[0]
-				yield local, alias.name if alias.asname else local
-			return
-		base = self.absolute(node)
-		for alias in node.names:
-			yield alias.asname or alias.name, f"{base}.{alias.name}" if base else alias.name
-
-	def resolve(self, dotted: str) -> str:
-		head, _, rest = dotted.partition(".")
-		target = self.names.get(head)
-		if not target:
-			return ""
-		return f"{target}.{rest}" if rest else target
-
-	def absolute(self, node: ast.ImportFrom) -> str:
-		if not node.level:
-			return node.module or ""
-		parts = self.module.split(".")
-		# Level 1 means "my package". An __init__ module is its own package.
-		drop = node.level - int(self.is_package)
-		base = parts[: len(parts) - drop] if drop else parts
-		return ".".join([*base, node.module] if node.module else base)
-
-
 class _ModuleVisitor(ast.NodeVisitor):
 	def __init__(self, facts: FileFacts, imports: ImportMap, known_apps: set[str], lists):
 		self.facts = facts
@@ -129,6 +97,8 @@ class _ModuleVisitor(ast.NodeVisitor):
 		self.patches = PatchRefs(imports, known_apps)
 		self.scope: list[tuple[str, str]] = []  # (kind, name)
 		self.local_defs: list[set[str]] = [set()]  # functions each enclosing def defines directly
+		# what each name is bound to, per def scope (module first): see Call.receiver
+		self.bindings: list[dict[str, str]] = [{}]
 
 	@property
 	def qual_scope(self) -> str:
@@ -150,7 +120,9 @@ class _ModuleVisitor(ast.NodeVisitor):
 		self.local_defs.append(
 			{c.name for c in node.body if isinstance(c, ast.FunctionDef | ast.AsyncFunctionDef)}
 		)
+		self.bindings.append({})
 		self.generic_visit(node)
+		self.bindings.pop()
 		self.local_defs.pop()
 		self.scope.pop()
 
@@ -158,10 +130,23 @@ class _ModuleVisitor(ast.NodeVisitor):
 
 	def visit_Call(self, node: ast.Call):
 		callee = dotted(node.func)
+		receiver = ""
+		if isinstance(node.func, ast.Attribute):
+			base = node.func.value
+			if isinstance(base, ast.Name):
+				receiver = self._binding(base.id)
+			elif isinstance(base, ast.Call):
+				# `Engine().run()`, `frappe.get_doc("Item", n).save()`: a method on a call's result
+				receiver = self._value_type(base)
+				inner = dotted(base.func)
+				callee = callee or (f"{inner}().{node.func.attr}" if inner else "")
 		if callee:
-			resolved = self._resolve_callee(callee)
-			self.facts.calls.append(Call(self.qual_scope, callee, resolved, node.lineno))
+			resolved = "" if "()" in callee else self._resolve_callee(callee)
+			arg = short_literal(node.args[0] if node.args else None)
+			self.facts.calls.append(Call(self.qual_scope, callee, resolved, node.lineno, receiver, arg))
 			self._record_frappe_refs(node, resolved or callee)
+			for value in [*node.args, *(kw.value for kw in node.keywords)]:
+				self._callback(value, resolved or callee)
 			self._custom_fields(custom_fields.from_call(node, resolved or callee))
 			if callee == "setattr":
 				self.facts.refs += self.patches.from_setattr(node, self.qual_scope, self.local_defs[-1])
@@ -170,6 +155,40 @@ class _ModuleVisitor(ast.NodeVisitor):
 	def visit_Assign(self, node: ast.Assign):
 		self.facts.refs += self.patches.from_assign(node, self.qual_scope, self.local_defs[-1])
 		self.generic_visit(node)
+		value = self._value_type(node.value)
+		for target in node.targets:
+			if isinstance(target, ast.Name):
+				self._bind(target.id, value)
+
+	def visit_AnnAssign(self, node: ast.AnnAssign):
+		self.generic_visit(node)
+		if isinstance(node.target, ast.Name) and node.value is not None:
+			self._bind(node.target.id, self._value_type(node.value))
+
+	def _bind(self, name: str, value: str):
+		"""Rebinding a name to something unknown forgets what it was."""
+		if value:
+			self.bindings[-1][name] = value
+		else:
+			self.bindings[-1].pop(name, None)
+
+	def _binding(self, name: str) -> str:
+		for scope in reversed(self.bindings):
+			if name in scope:
+				return scope[name]
+		return ""
+
+	def _value_type(self, node: ast.expr) -> str:
+		"""What an expression evaluates to, as far as this file says (see Call.receiver)."""
+		if isinstance(node, ast.Name):
+			return self._binding(node.id)
+		if not isinstance(node, ast.Call):
+			return ""
+		callee = dotted(node.func)
+		resolved = self._resolve_callee(callee) if callee else ""
+		if (resolved or callee) in DOC_LOADER_APIS:
+			return f"doctype:{doctype_arg(node, resolved or callee) or '?'}"
+		return f"call:{resolved}" if resolved else ""
 
 	def visit_Import(self, node: ast.Import):
 		for alias in node.names:
@@ -188,7 +207,19 @@ class _ModuleVisitor(ast.NodeVisitor):
 
 	def visit_Dict(self, node: ast.Dict):
 		self._custom_fields(custom_fields.from_dict(node, self.lists))
+		for value in node.values:
+			self._callback(value, "dict")
 		self.generic_visit(node)
+
+	def _callback(self, node: ast.expr, via: str):
+		"""A function of a bench app named without being called: passed to a call
+		(`frappe.enqueue(fn)`, `Rule(endpoint=fn)`) or stored in a dict (sandbox globals)."""
+		if not isinstance(node, ast.Name | ast.Attribute):
+			return
+		name = dotted(node)
+		target = self._resolve_callee(name) if name else ""
+		if target and target.split(".")[0] in self.known_apps:
+			self.facts.refs.append(Ref("callback", target, via, node.lineno, self.qual_scope, "pass"))
 
 	def _custom_fields(self, found: list[tuple[str, str, int]]):
 		for doctype, field, line in found:
@@ -231,7 +262,7 @@ class _ModuleVisitor(ast.NodeVisitor):
 				if kw.arg == "allow_guest":
 					sym.allow_guest = truthy(kw.value)
 				elif kw.arg == "methods":
-					sym.http_methods = _literal_text(kw.value)
+					sym.http_methods = literal_text(kw.value)
 
 	def _resolve_callee(self, callee: str) -> str:
 		head, _, rest = callee.partition(".")
@@ -266,26 +297,3 @@ def _signature(node) -> str:
 def _first_doc_line(node) -> str:
 	doc = ast.get_docstring(node, clean=True)
 	return doc.strip().splitlines()[0][:160] if doc else ""
-
-
-def _literal_text(node: ast.expr) -> str:
-	try:
-		value = ast.literal_eval(node)
-	except ValueError:
-		return ast.unparse(node)
-	return ",".join(value) if isinstance(value, list | tuple) else str(value)
-
-
-def _module_level_imports(body: list[ast.stmt]):
-	"""Imports that run at import time: top level, and in module-level if / try blocks."""
-	for node in body:
-		if isinstance(node, ast.Import | ast.ImportFrom):
-			yield node
-		elif isinstance(node, ast.If | ast.Try):
-			for block in (
-				node.body,
-				node.orelse,
-				getattr(node, "finalbody", []),
-				*[h.body for h in getattr(node, "handlers", [])],
-			):
-				yield from _module_level_imports(block)

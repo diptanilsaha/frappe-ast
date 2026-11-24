@@ -1,0 +1,76 @@
+"""Call-graph edges: one case per edge kind, the shapes that must get none, and paths across kinds."""
+
+import pytest
+
+from frappe_ast.queries import callgraph
+from frappe_ast.queries.callgraph import CallGraph
+
+TASK = "demo.demo.doctype.demo_task.demo_task"
+
+
+@pytest.fixture(scope="module")
+def graph(store):
+	return CallGraph(store)
+
+
+def edges_from(graph, caller):
+	return {(e["callee"], e["kind"]) for e in graph.edges(["demo"]) if e["caller"] == caller}
+
+
+@pytest.mark.parametrize(
+	"caller, callee, kind",
+	[
+		("demo.dispatch.make_storage", "demo.dispatch.Storage.__init__", "call"),  # Cls() runs __init__
+		(f"{TASK}.DemoTask.retire", "demo.controllers.base_document.BaseDocument.archive", "inherited"),
+		(
+			"demo.dispatch.use_engine",
+			"demo.dispatch.Engine.run",
+			"instance",
+		),  # engine = Engine(); engine.run()
+		("demo.dispatch.use_engine_inline", "demo.dispatch.Engine.run", "instance"),  # Engine().run()
+		(f"{TASK}.close_task", f"{TASK}.DemoTask.finish", "doc_method"),
+		("demo.dispatch.save_task", f"{TASK}.DemoTask.validate", "lifecycle"),
+		("demo.dispatch.save_task", "demo.api.validate_any", "doc_event"),  # doc_events "*"
+		("demo.dispatch.submit_note", "demo.api.on_submit_any", "doc_event"),
+		("demo.dispatch.Engine.conditions", "demo.dispatch.task_query", "hook"),
+		("demo.dispatch.use_proxy", "demo.dispatch.build_query", "proxy"),  # qb: LocalProxy["Builder"]
+		("demo.dispatch.Storage.store", "demo.dispatch.DiskStorage.write", "override"),
+		("demo.dispatch.start_jobs", "demo.dispatch.job", "callback"),  # frappe.enqueue(job)
+		("demo.dispatch.safe_globals", "demo.dispatch.sandboxed", "callback"),  # {"run": sandboxed}
+		("demo.dispatch.start_jobs", "demo.dispatch.by_string", "dispatch"),  # frappe.enqueue("a.b.c")
+		("demo.dispatch.configure", "demo.dispatch.setup", "dotted"),
+	],
+)
+def test_edge_kinds(graph, caller, callee, kind):
+	assert (callee, kind) in edges_from(graph, caller)
+
+
+def test_override_keeps_the_base_method(graph):
+	assert ("demo.dispatch.Storage.write", "call") in edges_from(graph, "demo.dispatch.Storage.store")
+
+
+@pytest.mark.parametrize(
+	"caller, kinds",
+	[
+		("demo.dispatch.rebound", {"instance"}),  # rebinding the name forgets the type
+		("demo.dispatch.unknown_doc", {"lifecycle", "doc_event"}),  # DocType not a literal
+	],
+)
+def test_no_edge_without_a_type(graph, caller, kinds):
+	assert not {k for _, k in edges_from(graph, caller)} & kinds
+
+
+def test_lifecycle_runs_only_its_events(graph):
+	# frappe.delete_doc runs on_trash / on_change / after_delete, never validate
+	assert ("demo.api.validate_any", "doc_event") not in edges_from(graph, "demo.dispatch.drop_task")
+
+
+def test_wide_overrides_are_skipped(store, monkeypatch):
+	monkeypatch.setattr(callgraph, "MAX_OVERRIDES", 0)  # as if Storage were Document
+	edges = edges_from(CallGraph(store), "demo.dispatch.Storage.store")
+	assert not {k for _, k in edges} & {"override"}
+
+
+def test_paths_cross_edge_kinds(graph):
+	paths = graph.paths("demo.dispatch.use_engine", "demo.dispatch.task_query")
+	assert [e["kind"] for e in paths[0]] == ["instance", "call", "hook"]
