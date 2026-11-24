@@ -3,8 +3,10 @@
 from pathlib import Path
 
 from frappe_ast.commands.base import Command
+from frappe_ast.queries.callgraph import CallGraph
 from frappe_ast.queries.lookup import Lookup
 from frappe_ast.queries.outline import Outline
+from frappe_ast.queries.surface import Surface
 from frappe_ast.workspace import Bench
 
 
@@ -60,6 +62,106 @@ class CalleesCommand(Command):
 
 	def run(self, ctx, args):
 		ctx.render.emit(Lookup(ctx.store(), args.limit).callees(args.target))
+
+
+class EdgesCommand(Command):
+	help = "the resolved call graph out of a symbol or app: calls, inherited, overriding and instance methods, document lifecycle, doc_events, hook dispatch and functions passed by reference"
+
+	def arguments(self, p):
+		p.add_argument("target", nargs="?", help="a caller qualname; omit with --app to list every edge")
+		p.add_argument("--app", action="append", help="callers in this app (repeatable)")
+		p.add_argument(
+			"--kind",
+			help="call, inherited, instance, proxy, doc_method, lifecycle, doc_event, hook, override, callback, dispatch, dotted",
+		)
+
+	def run(self, ctx, args):
+		graph = CallGraph(ctx.store())
+		edges = graph.edges(args.app or None)
+		if args.target:
+			edges = [e for e in edges if e["caller"] == args.target]
+		if args.kind:
+			edges = [e for e in edges if e["kind"] == args.kind]
+		edges.sort(key=lambda e: (e["path"], e["line"]))
+		ctx.render.emit(edges if args.json and not args.target else edges[: args.limit])
+
+
+class PathsCommand(Command):
+	help = "shortest call paths from one Python symbol to another, through every edge kind of `edges`"
+
+	def arguments(self, p):
+		p.add_argument("source", help="caller qualname, e.g. an endpoint")
+		p.add_argument("target", help="callee qualname")
+		p.add_argument("--depth", type=int, default=12)
+
+	def run(self, ctx, args):
+		paths = CallGraph(ctx.store()).paths(args.source, args.target, min(args.limit, 20), args.depth)
+		if not paths:
+			ctx.render.emit(f"no path from {args.source} to {args.target} within {args.depth} calls")
+			return 1
+		ctx.render.emit(
+			[
+				{
+					"route": i + 1,
+					"steps": [
+						f"{e['path']}:{e['line']}  {e['caller']} -[{e['kind']}]-> {e['callee']}" for e in p
+					],
+				}
+				for i, p in enumerate(paths)
+			]
+		)
+
+
+class SurfaceCommand(Command):
+	help = "entry points: functions a request, document operation, hook or job runs directly (--reached: every function they reach)"
+
+	def arguments(self, p):
+		p.add_argument(
+			"--kind",
+			help="api, guest_api, route, request, www, doc_lifecycle, doc_event, permission, scheduler, template, report, hook",
+		)
+		p.add_argument(
+			"--reached", action="store_true", help="every reached function, with surface kinds and depth"
+		)
+
+	def run(self, ctx, args):
+		surface = Surface(ctx.store())
+		if args.reached:
+			rows = [{"function": q, **v} for q, v in sorted(surface.reached().items())]
+		else:
+			rows = [{"function": q, "kinds": sorted(k)} for q, k in sorted(surface.roots().items())]
+		if args.kind:
+			rows = [r for r in rows if args.kind in r["kinds"]]
+		ctx.render.emit(rows if args.json else rows[: args.limit])
+
+
+class ReachCommand(Command):
+	help = (
+		"how something outside the process can make a function run: the shortest route from each surface root"
+	)
+
+	def arguments(self, p):
+		p.add_argument("target", help="function qualname")
+		p.add_argument("--depth", type=int, default=20)
+
+	def run(self, ctx, args):
+		routes = Surface(ctx.store()).reach(args.target, min(args.limit, 50), args.depth)
+		if not routes:
+			ctx.render.emit(f"no surface root reaches {args.target} within {args.depth} calls")
+			return 1
+		ctx.render.emit(
+			[
+				{
+					"root": r["root"],
+					"kinds": ", ".join(r["kinds"]),
+					"steps": [
+						f"{e['path']}:{e['line']}  {e['caller']} -[{e['kind']}]-> {e['callee']}"
+						for e in r["steps"]
+					],
+				}
+				for r in routes
+			]
+		)
 
 
 class RefsCommand(Command):

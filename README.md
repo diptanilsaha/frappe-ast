@@ -22,6 +22,7 @@ It runs on Python 3.11 and later, so it installs next to a v15 bench. It still r
 - **Frontend calls:** frappe-ui (`createResource`, `useCall`, `useDoc`, `useDoctype`, `createListResource`, v2 URLs), handles imported from another file, method paths in Vue template props, and frappe-react-sdk.
 - **DocType controller methods:** the form's own controller, its base classes, `override_doctype_class`, `extend_doctype_class`, and Button fields whose `options` name a method.
 - **Desk forms:** the scripts each app loads in desk order, `frappe.ui.form.on` handlers, the JS controller class chain, and shared `public/js` code that installs itself on forms (setup functions, `@self` handlers, `$.extend` helpers, classes made with `new`).
+- **Call graph and entry points:** what each function makes run (calls, inherited and overriding methods, `Cls()` into `__init__`, document lifecycle and `doc_events`, `frappe.get_hooks` dispatch, functions passed to `frappe.enqueue` or a werkzeug `Rule`), and every route from something outside the process (whitelisted methods, REST routes, the request pipeline, website pages, controller lifecycle methods, hooks, jobs) to a function.
 - **Hooks:** `doc_events`, `scheduler_events`, `override_whitelisted_methods`, `regional_overrides` and the rest, including keys that `hooks.py` computes.
 - **Monkey patches:** `module.f = g`, `Class.m = g`, `setattr(...)`, wrappers such as frappe's recorder on `Document.run_method`, and patches on `frappe.db`.
 - **DocTypes and records:** fields, permissions, connections, actions and states from JSON, custom fields that apps ship, and Report, Page, Web Form and Number Card records.
@@ -39,6 +40,7 @@ frappe-ast doctype "Sales Invoice"        # controller, hooks, schema, client co
 frappe-ast form "Sales Order" item_code   # what runs in the desk form, in load order
 frappe-ast check apps/erpnext             # broken hooks, calls, fields and patches
 frappe-ast impact --base origin/develop   # what a diff touches
+frappe-ast reach frappe.utils.response.send_private_file   # every route from a request to it
 frappe-ast --help
 ```
 

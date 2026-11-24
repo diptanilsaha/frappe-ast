@@ -8,7 +8,7 @@ from pathlib import Path
 
 from frappe_ast.model import FileFacts
 
-SCHEMA_VERSION = "5"
+SCHEMA_VERSION = "6"
 SCHEMA = """
 create table if not exists meta (key text primary key, value text);
 create table if not exists files (
@@ -20,7 +20,9 @@ create table if not exists symbols (
 	signature text, parent text, doc text, decorators text,
 	whitelisted integer, allow_guest integer, http_methods text
 );
-create table if not exists calls (file_id integer, caller text, callee text, resolved text, line integer);
+create table if not exists calls (
+	file_id integer, caller text, callee text, resolved text, line integer, receiver text, arg text
+);
 create table if not exists refs (
 	file_id integer, kind text, target text, via text, line integer, scope text, access text
 );
@@ -183,8 +185,8 @@ class Store:
 			],
 		)
 		self.db.executemany(
-			"insert into calls values (?,?,?,?,?)",
-			[(file_id, c.caller, c.callee, c.resolved, c.line) for c in facts.calls],
+			"insert into calls values (?,?,?,?,?,?,?)",
+			[(file_id, c.caller, c.callee, c.resolved, c.line, c.receiver, c.arg) for c in facts.calls],
 		)
 		self.db.executemany(
 			"insert into refs values (?,?,?,?,?,?,?)",

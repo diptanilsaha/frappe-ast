@@ -5,6 +5,7 @@ from frappe_ast.python.analyzer import PythonAnalyzer
 from frappe_ast.python.hooks import HooksReader
 
 API = "apps/demo/demo/api.py"
+DISPATCH = "apps/demo/demo/dispatch.py"
 APPS = {"demo", "frappe"}
 
 
@@ -59,6 +60,30 @@ def test_frappe_refs(analyze):
 	assert {"Demo Task", "Demo Note"} <= facts.targets("doctype")
 	assert "demo.api.validate_any" in facts.targets("method")  # frappe.enqueue
 	assert facts.targets("realtime") == {"task_done"}
+
+
+def test_call_receivers(analyze):
+	# what a method is called on, for the call graph: an instance, or a document of a DocType
+	calls = {(c.callee, c.receiver, c.arg) for c in analyze(DISPATCH).facts.calls}
+	assert ("engine.run", "call:demo.dispatch.Engine", "") in calls
+	assert ("Engine().run", "call:demo.dispatch.Engine", "") in calls
+	assert ("doc.save", "doctype:Demo Task", "") in calls
+	assert ("frappe.get_doc().submit", "doctype:Demo Note", "") in calls
+	assert ("doc.save", "doctype:?", "") in calls
+	assert ("frappe.get_hooks", "", "permission_query_conditions") in calls
+	assert ("frappe.db.sql", "", "") in calls  # a multi-line SQL string is not a name
+
+
+def test_callback_refs(analyze):
+	refs = {(r.target, r.via, r.scope) for r in analyze(DISPATCH).refs("callback")}
+	assert ("demo.dispatch.job", "frappe.enqueue", "demo.dispatch.start_jobs") in refs
+	assert ("demo.dispatch.route_handler", "werkzeug.routing.Rule", "<module>") in refs
+	assert ("demo.dispatch.sandboxed", "dict", "demo.dispatch.safe_globals") in refs
+
+
+def test_typed_module_attributes(analyze):
+	qb = next(s for s in analyze(DISPATCH).symbols if s.qualname == "demo.dispatch.qb")
+	assert (qb.kind, qb.signature) == ("variable", "demo.dispatch.Builder")
 
 
 def test_api_urls_in_strings(analyze):

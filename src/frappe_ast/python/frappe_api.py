@@ -122,3 +122,82 @@ def realtime_event(node: ast.Call) -> str:
 # A server method inside a URL: "/api/method/app.api.x?y=1", get_url("/api/method/..."), and the
 # constant part of f"/api/method/app.api.x?y={y}". A path cut by an interpolation does not match.
 API_URL_RE = re.compile(r"(?:^|/)api/(?:v2/)?method/([a-z_]\w*(?:\.\w+)+)(?=$|[?#/])")
+
+
+# Calls that return a document of the DocType named by their first argument. A variable bound to
+# one (`doc = frappe.get_doc("Sales Order", name)`) is a document of that DocType.
+DOC_LOADER_APIS = (
+	"frappe.get_doc",
+	"frappe.get_cached_doc",
+	"frappe.get_lazy_doc",
+	"frappe.get_last_doc",
+	"frappe.new_doc",
+	"frappe.get_single",
+)
+
+# What the document layer runs, by the Document method (or frappe API) that starts it. From
+# frappe/model/document.py (insert, run_before_save_methods, run_post_save_methods, discard),
+# delete_doc.py and rename_doc.py. Each name is a controller method and a doc_events event.
+LIFECYCLE_EVENTS = {
+	"insert": (
+		"before_insert",
+		"before_validate",
+		"validate",
+		"before_save",
+		"on_update",
+		"on_change",
+		"after_insert",
+	),
+	"save": (
+		"before_validate",
+		"validate",
+		"before_save",
+		"before_update_after_submit",
+		"on_update",
+		"on_update_after_submit",
+		"on_change",
+	),
+	"submit": ("validate", "before_submit", "on_update", "on_submit", "on_change"),
+	"cancel": ("before_cancel", "on_cancel", "on_change"),
+	"delete": ("on_trash", "on_change", "after_delete"),
+	"rename": ("before_rename", "after_rename"),
+	"discard": ("before_discard", "on_discard"),
+}
+
+# frappe APIs that run a DocType's lifecycle for the DocType named by their first argument.
+LIFECYCLE_APIS = {"frappe.delete_doc": "delete", "frappe.rename_doc": "rename"}
+
+# Reading hooks.py at run time: a function that calls one of these with a literal key dispatches
+# to every callback registered under that key.
+HOOK_READER_APIS = ("frappe.get_hooks",)
+
+# What makes a function reachable from outside the process, by how it gets there. A function is a
+# root (an entry point) when one of these applies; see queries/surface.py.
+ROUTE_APIS = ("werkzeug.routing.Rule", "werkzeug.routing.rules.Rule")  # Rule(path, endpoint=fn)
+REQUEST_ROOTS = ("frappe.app.application",)  # the WSGI entry: auth, session, CSRF, routing
+WWW_DIRS = ("/www/", "/templates/pages/")  # get_context of a website route
+SURFACE_HOOKS = {
+	"doc_events": "doc_event",
+	"scheduler_events": "scheduler",
+	"has_permission": "permission",
+	"permission_query_conditions": "permission",
+	"has_website_permission": "permission",
+	"before_request": "request",
+	"after_request": "request",
+	"auth_hooks": "request",
+	"on_session_creation": "request",
+	"on_login": "request",
+	"on_logout": "request",
+	"extend_bootinfo": "request",
+	"boot_session": "request",
+	"website_context": "request",
+	"update_website_context": "request",
+	"website_path_resolver": "request",
+	"page_renderer": "request",
+	"get_website_user_home_page": "request",
+	"role_home_page": "request",
+	"override_whitelisted_methods": "api",
+	"standard_queries": "api",
+	"jinja": "template",
+	"webform_list_context": "www",
+}  # any other hook value that names a function is a root of kind "hook"
