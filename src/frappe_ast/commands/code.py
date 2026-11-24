@@ -4,6 +4,7 @@ from pathlib import Path
 
 from frappe_ast.commands.base import Command
 from frappe_ast.queries.callgraph import CallGraph
+from frappe_ast.queries.flow import FlowQuery
 from frappe_ast.queries.lookup import Lookup
 from frappe_ast.queries.outline import Outline
 from frappe_ast.queries.surface import Surface
@@ -162,6 +163,36 @@ class ReachCommand(Command):
 				for r in routes
 			]
 		)
+
+
+class FlowCommand(Command):
+	help = "argument flow: which call arguments carry a function's parameters or request input (form_dict, headers, body)"
+
+	def arguments(self, p):
+		p.add_argument(
+			"target", nargs="?", help="a function qualname; omit with --to to search every function"
+		)
+		p.add_argument("--to", help="only calls of this function, e.g. frappe.get_doc")
+		p.add_argument(
+			"--source", help="only sources starting with this: param, param:name, form_dict, request"
+		)
+		p.add_argument("--direct", action="store_true", help="only values that reach the argument unchanged")
+		p.add_argument("--app", action="append", help="functions in this app (repeatable)")
+		p.add_argument(
+			"--follow", action="store_true", help="continue into the bench functions an argument is passed to"
+		)
+		p.add_argument("--depth", type=int, default=4, help="calls to follow (with --follow)")
+
+	def run(self, ctx, args):
+		if not (args.target or args.to) or (args.follow and not args.target):
+			ctx.render.emit("give a function, --to <callee>, or both (--follow needs a function)")
+			return 2
+		query, source = FlowQuery(ctx.store()), args.source or ""
+		if args.follow:
+			rows = query.follow(args.target, args.to or "", source, args.direct, args.depth)
+		else:
+			rows = query.rows(args.target or "", args.to or "", source, args.direct, args.app)
+		ctx.render.emit(rows if args.json else rows[: args.limit])
 
 
 class RefsCommand(Command):

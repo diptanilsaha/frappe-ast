@@ -1,25 +1,24 @@
 """Extract symbols, calls and Frappe references from one Python file."""
 
 import ast
-import re
 
 from frappe_ast.model import Call, FileFacts, Ref, Symbol
 from frappe_ast.python import compat, custom_fields
 from frappe_ast.python.astutil import dotted, literal_text, short_literal, truthy
 from frappe_ast.python.checks import PythonChecks
+from frappe_ast.python.flows import FunctionFlows
 from frappe_ast.python.frappe_api import (
 	API_URL_RE,
 	DOC_LOADER_APIS,
 	DOCTYPE_APIS,
 	DOTTED_APIS,
+	DOTTED_RE,
 	REALTIME_APIS,
 	doctype_arg,
 	realtime_event,
 )
 from frappe_ast.python.imports import ImportMap, annotation_types
 from frappe_ast.python.patches import PatchRefs
-
-DOTTED_RE = re.compile(r"^[a-z_][a-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*){2,}$")
 
 
 class PythonAnalyzer:
@@ -121,6 +120,7 @@ class _ModuleVisitor(ast.NodeVisitor):
 			{c.name for c in node.body if isinstance(c, ast.FunctionDef | ast.AsyncFunctionDef)}
 		)
 		self.bindings.append({})
+		self.facts.flows += FunctionFlows(node, self.qual_scope, self._resolve_callee, in_class).run()
 		self.generic_visit(node)
 		self.bindings.pop()
 		self.local_defs.pop()

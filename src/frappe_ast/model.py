@@ -37,6 +37,19 @@ class Call:
 
 
 @dataclass
+class Flow:
+	"""A value that reaches a call's argument from a parameter or the request, in one function."""
+
+	caller: str  # qualname of the function
+	callee: str  # as written
+	resolved: str
+	line: int
+	arg: str  # "0", "1", ... positional; a keyword name; "*" / "**" for unpacking
+	source: str  # "param:<name>", "form_dict[:<key>]", "request.<attr>[:<key>]"
+	via: str = ""  # the outermost call or operation between source and argument; "" when direct
+
+
+@dataclass
 class Ref:
 	"""A reference to a Frappe entity (DocType, server method, hook...)."""
 
@@ -65,5 +78,6 @@ class FileFacts:
 	symbols: list[Symbol] = field(default_factory=list)
 	calls: list[Call] = field(default_factory=list)
 	refs: list[Ref] = field(default_factory=list)
+	flows: list[Flow] = field(default_factory=list)
 	findings: list[Finding] = field(default_factory=list)
 	error: str = ""

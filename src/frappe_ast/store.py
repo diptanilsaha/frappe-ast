@@ -8,7 +8,7 @@ from pathlib import Path
 
 from frappe_ast.model import FileFacts
 
-SCHEMA_VERSION = "6"
+SCHEMA_VERSION = "7"
 SCHEMA = """
 create table if not exists meta (key text primary key, value text);
 create table if not exists files (
@@ -25,6 +25,9 @@ create table if not exists calls (
 );
 create table if not exists refs (
 	file_id integer, kind text, target text, via text, line integer, scope text, access text
+);
+create table if not exists flows (
+	file_id integer, caller text, callee text, resolved text, line integer, arg text, source text, via text
 );
 create table if not exists findings (
 	file_id integer, rule text, severity text, message text, line integer, scope text
@@ -57,7 +60,7 @@ create index if not exists ix_perms_role on permissions(role);
 create index if not exists ix_dtlinks_dt on doctype_links(doctype);
 create index if not exists ix_dtlinks_target on doctype_links(kind, target);
 """
-FACT_TABLES = ("symbols", "calls", "refs", "findings")
+FACT_TABLES = ("symbols", "calls", "refs", "flows", "findings")
 DOCTYPE_TABLES = ("fields", "permissions", "doctype_links")
 
 
@@ -191,6 +194,10 @@ class Store:
 		self.db.executemany(
 			"insert into refs values (?,?,?,?,?,?,?)",
 			[(file_id, r.kind, r.target, r.via, r.line, r.scope, r.access) for r in facts.refs],
+		)
+		self.db.executemany(
+			"insert into flows values (?,?,?,?,?,?,?,?)",
+			[(file_id, f.caller, f.callee, f.resolved, f.line, f.arg, f.source, f.via) for f in facts.flows],
 		)
 		self.db.executemany(
 			"insert into findings values (?,?,?,?,?,?)",

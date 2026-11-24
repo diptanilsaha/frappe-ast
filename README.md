@@ -13,6 +13,7 @@ frappe-ast doctype "Sales Invoice"            # controller, doc_events from ever
 frappe-ast form "Sales Order" item_code       # the handlers a field change runs, in desk order
 frappe-ast edges erpnext.controllers.stock_controller.StockController.validate   # what it makes run
 frappe-ast reach frappe.utils.response.send_private_file   # every route from an entry point to it
+frappe-ast flow frappe.auth.LoginManager.authenticate --follow   # where each request value goes, across calls
 frappe-ast check apps/erpnext                 # dead hooks, missing methods, unknown fields
 frappe-ast impact --base origin/develop       # what a diff touches, and who depends on it
 ```
@@ -42,6 +43,7 @@ It parses Python with `ast`, JS, TS and Vue with tree-sitter, and `hooks.py` and
 | `method <dotted>` | Definition, overrides, patches, hooks, Python callers and client calls (`frappe.call`, `frm.call`, frappe-ui, URLs, Button fields). |
 | `callers` / `callees` | Python calls into or out of a symbol, resolved through imports and re-exports. |
 | `edges <fn>` / `paths <from> <to>` | The call graph: inherited and overriding methods, constructors, document lifecycle, `doc_events`, hook dispatch, functions passed to `frappe.enqueue`. |
+| `flow <fn> [--follow]` | Where a function's parameters and request input go: each call and argument they reach, unchanged or through what, and on into the functions they are passed to. |
 | `surface` / `reach <fn>` | Functions that requests, pages, documents, hooks and jobs run directly, and the route from each to a function. |
 | `doctype <name>` | Controller and its bases, `doc_events`, overrides, schema, links and the client code that names its fields. |
 | `form <DocType> [field]` | A desk form's scripts from every app, its JS controller chain, and the handlers per event. |
