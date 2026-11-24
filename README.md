@@ -64,5 +64,6 @@ It parses Python with `ast`, JS, TS and Vue with tree-sitter, and `hooks.py` and
 - [How it works](docs/how-it-works.md): how the index is built and refreshed, what it holds, and a flow diagram for each command.
 - [Call graph and entry points](docs/call-graph.md): reading `edges`, `paths`, `surface` and `reach`, with sample output and every edge and entry-point kind.
 - [Argument flow](docs/argument-flow.md): reading `flow` and `--follow`, how values are tracked, and the filters.
+- [The index's facts](docs/facts.md): what the values in each table mean, for `sql` queries.
 - [`harness/AGENTS.md`](harness/AGENTS.md): for agents working in a bench, which query answers which question, and what static analysis cannot see.
 - [`AGENTS.md`](AGENTS.md): for agents changing this tool.

@@ -88,7 +88,7 @@ usually take under a second. A schema change (`SCHEMA_VERSION`) rebuilds the tab
 | `meta` | schema version, tool hash, bench path, frappe-ui copies, frontends | indexer |
 
 Analyzers record only what one file says. Joining facts across files and apps is the job of the
-queries.
+queries. [The index's facts](facts.md) gives the format of each column.
 
 ## 4. What the queries share
 
