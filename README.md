@@ -57,4 +57,4 @@ It parses Python with `ast`, JS, TS and Vue with tree-sitter, and `hooks.py` and
 | `sql <query>` | Read-only SQL over the index. |
 | `index` / `status` | Build or refresh the index; where it is and how fresh. |
 
-`frappe-ast <command> --help` lists each command's options. `AGENTS.md` is the guide for agents that work on this tool.
+The guides walk through commands with sample output: [call graph and entry points](docs/call-graph.md) (`edges`, `paths`, `surface`, `reach`) and [argument flow](docs/argument-flow.md) (`flow`). `frappe-ast <command> --help` lists each command's options. `AGENTS.md` is the guide for agents that work on this tool.

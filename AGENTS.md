@@ -40,6 +40,7 @@ commands/      one Command class per subcommand (base, index, code, reports, rev
 - Desk semantics come from frappe's own code: `frappe/desk/form/meta.py` (script load order) and `frappe/public/js/frappe/form/script_manager.js` (handler order). Read them on the bench before you change `queries/forms.py` or `queries/form.py`.
 - Library units (`frappe-ui@...`) are indexed for lookup, never checked, and their tests are not indexed.
 - Output is for agents: one line per fact, `path:line` first, no empty sections. Every query must stay useful at `--limit 5`.
+- `docs/` holds the guides for people, with real sample output. When a change alters what a command prints, rerun the samples it shows there.
 
 ## Change workflow
 
