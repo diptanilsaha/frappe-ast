@@ -6,6 +6,7 @@ from frappe_ast.python.hooks import HooksReader
 
 API = "apps/demo/demo/api.py"
 DISPATCH = "apps/demo/demo/dispatch.py"
+ARGFLOW = "apps/demo/demo/argflow.py"
 APPS = {"demo", "frappe"}
 
 
@@ -84,6 +85,23 @@ def test_callback_refs(analyze):
 def test_typed_module_attributes(analyze):
 	qb = next(s for s in analyze(DISPATCH).symbols if s.qualname == "demo.dispatch.qb")
 	assert (qb.kind, qb.signature) == ("variable", "demo.dispatch.Builder")
+
+
+def test_argument_flow(analyze):
+	"""(line, callee, argument, source, via): which arguments carry a parameter or request input."""
+	flows = {(f.line, f.callee, f.arg, f.source, f.via) for f in analyze(ARGFLOW).facts.flows}
+	assert (7, "frappe.get_doc", "1", "param:name", "") in flows
+	assert (8, "doc.update", "0", "param:kwargs", "") in flows
+	assert (10, "frappe.db.sql", "0", "form_dict:limit", "f-string,frappe.utils.cint") in flows
+	assert (11, "frappe.get_list", "filters", "param:name", "container") in flows
+	assert (16, "frappe.db.get_value", "1", "param:name", "") in flows  # assigned in one branch
+	assert (18, "frappe.get_doc", "1", "param:kwargs", "") in flows  # a loop variable
+	assert (20, "frappe.db.exists", "1", "param:name", ".strip") in flows
+	assert (28, "frappe.db.get_value", "1", "form_dict:task", "") in flows
+	assert (27, "frappe.cache.set_value", "1", "request.headers:Host", "") in flows
+	assert (33, "frappe.make_get_request", "0", "param:url", "") in flows  # self is not a parameter
+	assert not {f for f in flows if f[0] == 22}  # name was rebound to a literal
+	assert not {f for f in flows if f[1] == "isinstance"}
 
 
 def test_api_urls_in_strings(analyze):

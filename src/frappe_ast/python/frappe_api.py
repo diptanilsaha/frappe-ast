@@ -121,6 +121,9 @@ def realtime_event(node: ast.Call) -> str:
 
 # A server method inside a URL: "/api/method/app.api.x?y=1", get_url("/api/method/..."), and the
 # constant part of f"/api/method/app.api.x?y={y}". A path cut by an interpolation does not match.
+# A dotted path to a function of a bench app: at least module.module.name.
+DOTTED_RE = re.compile(r"^[a-z_][a-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*){2,}$")
+
 API_URL_RE = re.compile(r"(?:^|/)api/(?:v2/)?method/([a-z_]\w*(?:\.\w+)+)(?=$|[?#/])")
 
 
@@ -201,3 +204,18 @@ SURFACE_HOOKS = {
 	"jinja": "template",
 	"webform_list_context": "www",
 }  # any other hook value that names a function is a root of kind "hook"
+
+
+# Request input, for argument flow (python/flows.py): an attribute path that holds what the client
+# sent, by label, and calls that return a part of it (a header by name, the JSON body).
+REQUEST_SOURCES = {
+	"frappe.form_dict": "form_dict",
+	"frappe.local.form_dict": "form_dict",
+	"frappe.request": "request",
+	"frappe.local.request": "request",
+}
+REQUEST_SOURCE_CALLS = {
+	"frappe.get_request_header": "request.headers",
+	"frappe.request.get_json": "request.json",
+	"frappe.request.get_data": "request.data",
+}

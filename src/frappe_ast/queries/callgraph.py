@@ -206,7 +206,8 @@ class CallGraph:
 		return found
 
 	def _hook_values(self, key: str) -> list[str]:
-		return sorted({value for _, _, value in self._hooks.get(key, ()) if "." in value})
+		"""The functions registered under a hook key; other values (paths, HTML, URLs) are data."""
+		return sorted({f for f in (self._callable(v) for _, _, v in self._hooks.get(key, ())) if f})
 
 	def _callable(self, dotted: str) -> str:
 		if self._symbols.get(dotted) in ("function", "method"):

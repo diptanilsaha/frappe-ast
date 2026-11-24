@@ -138,3 +138,7 @@ def setup():
 
 def configure():
 	return {"handler": "demo.dispatch.setup"}
+
+
+def run_handlers():
+	return frappe.get_hooks("demo_handlers")

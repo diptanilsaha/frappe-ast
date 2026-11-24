@@ -60,6 +60,12 @@ def test_no_edge_without_a_type(graph, caller, kinds):
 	assert not {k for _, k in edges_from(graph, caller)} & kinds
 
 
+def test_hook_edges_only_reach_functions(graph):
+	edges = edges_from(graph, "demo.dispatch.run_handlers")
+	assert ("demo.dispatch.setup", "hook") in edges
+	assert not {c for c, _ in edges if c.startswith("/")}  # a path registered under the same key
+
+
 def test_lifecycle_runs_only_its_events(graph):
 	# frappe.delete_doc runs on_trash / on_change / after_delete, never validate
 	assert ("demo.api.validate_any", "doc_event") not in edges_from(graph, "demo.dispatch.drop_task")

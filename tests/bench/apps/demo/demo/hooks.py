@@ -14,3 +14,4 @@ permission_query_conditions = {"Demo Task": "demo.dispatch.task_query"}
 before_request = ["demo.dispatch.check_request"]
 jinja = {"methods": ["demo.dispatch.format_task"]}
 after_install = "demo.dispatch.setup"
+demo_handlers = ["demo.dispatch.setup", "/assets/demo/handler.js"]
