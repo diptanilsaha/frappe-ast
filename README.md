@@ -13,7 +13,7 @@ frappe-ast doctype "Sales Invoice"            # controller, doc_events from ever
 frappe-ast form "Sales Order" item_code       # the handlers a field change runs, in desk order
 frappe-ast edges erpnext.controllers.stock_controller.StockController.validate   # what it makes run
 frappe-ast reach frappe.utils.response.send_private_file   # every route from an entry point to it
-frappe-ast flow frappe.auth.LoginManager.authenticate --follow   # where each request value goes, across calls
+frappe-ast flow frappe.api.v2.bulk_update_docs --follow   # where each argument goes, across calls
 frappe-ast check apps/erpnext                 # dead hooks, missing methods, unknown fields
 frappe-ast impact --base origin/develop       # what a diff touches, and who depends on it
 ```
