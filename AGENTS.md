@@ -45,7 +45,7 @@ commands/      one Command class per subcommand (base, index, code, reports, rev
 ## Change workflow
 
 1. Reproduce on a real bench first: `uv run frappe-ast <cmd> --bench ~/benches/bench16` (also bench15 and maintain-bench; see `harness/AGENTS.md` for the versions).
-2. Add the case to the synthetic bench in `tests/bench` (real app files: `demo`, and `demo_fr` for one app that patches another). Add an assertion to the test module of that area: `test_python.py` or `test_js.py` for analyzer facts (use the `analyze` fixture), `test_method.py`, `test_forms.py`, `test_doctypes.py`, `test_callgraph.py` (one case per edge kind) `test_surface.py` (one case per root kind) or `test_flow.py` for queries, `test_checks.py` for an FX rule, `test_index.py` for indexing. Watch it fail.
+2. Add the case to the synthetic bench in `tests/bench` (real app files: `demo`, and `demo_fr` for one app that patches another). Add an assertion to the test module of that area: `test_python.py` or `test_js.py` for analyzer facts (use the `analyze` fixture), `test_method.py`, `test_forms.py`, `test_doctypes.py`, `test_callgraph.py` (one case per edge kind) `test_surface.py` (one case per root kind) or `test_flow.py` for queries, `test_checks.py` for an FX rule, `test_index.py` for indexing. When a test checks a particular line, tag it in the fixture with a trailing `# @tag` and look it up with `support.tagged_lines`, so editing the fixture never shifts an assertion. Watch it fail.
 3. Make the change. Done when all of these are clean (run them from the repository root):
    ```sh
    uv run pytest -q
