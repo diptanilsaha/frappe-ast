@@ -12,7 +12,7 @@ frappe-ast method erpnext.selling.doctype.quotation.quotation.make_sales_order  
 frappe-ast doctype "Sales Invoice"            # controller, doc_events from every app, schema, client code
 frappe-ast form "Sales Order" item_code       # the handlers a field change runs, in desk order
 frappe-ast edges erpnext.controllers.stock_controller.StockController.validate   # what it makes run
-frappe-ast reach frappe.utils.response.send_private_file   # every route from an entry point to it
+frappe-ast reach erpnext.stock.stock_ledger.make_sl_entries   # every route from an entry point to it
 frappe-ast flow frappe.api.v2.bulk_update_docs --follow   # where each argument goes, across calls
 frappe-ast check apps/erpnext                 # dead hooks, missing methods, unknown fields
 frappe-ast impact --base origin/develop       # what a diff touches, and who depends on it
@@ -57,4 +57,12 @@ It parses Python with `ast`, JS, TS and Vue with tree-sitter, and `hooks.py` and
 | `sql <query>` | Read-only SQL over the index. |
 | `index` / `status` | Build or refresh the index; where it is and how fresh. |
 
-[How it works](docs/how-it-works.md) shows how the index is built and the flow behind every command. The guides walk through commands with sample output: [call graph and entry points](docs/call-graph.md) (`edges`, `paths`, `surface`, `reach`) and [argument flow](docs/argument-flow.md) (`flow`). `frappe-ast <command> --help` lists each command's options. `AGENTS.md` is the guide for agents that work on this tool.
+`frappe-ast <command> --help` lists each command's options.
+
+## Docs
+
+- [How it works](docs/how-it-works.md): how the index is built and refreshed, what it holds, and a flow diagram for each command.
+- [Call graph and entry points](docs/call-graph.md): reading `edges`, `paths`, `surface` and `reach`, with sample output and every edge and entry-point kind.
+- [Argument flow](docs/argument-flow.md): reading `flow` and `--follow`, how values are tracked, and the filters.
+- [`harness/AGENTS.md`](harness/AGENTS.md): for agents working in a bench, which query answers which question, and what static analysis cannot see.
+- [`AGENTS.md`](AGENTS.md): for agents changing this tool.
