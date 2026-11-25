@@ -28,7 +28,7 @@ from frappe_ast.python.frappe_api import (
 	SURFACE_HOOKS,
 	WWW_DIRS,
 )
-from frappe_ast.queries.callgraph import CallGraph
+from frappe_ast.queries.callgraph import CallGraph, Edge
 from frappe_ast.store import Store
 
 _LIFECYCLE = set(LIFECYCLE_METHODS) | {"get_context", "has_website_permission"}
@@ -38,12 +38,6 @@ class Surface:
 	def __init__(self, store: Store, graph: CallGraph | None = None):
 		self.store = store
 		self.graph = graph or CallGraph(store)
-		self._edges: list[dict] | None = None
-
-	def edges(self) -> list[dict]:
-		if self._edges is None:
-			self._edges = self.graph.edges()
-		return self._edges
 
 	def roots(self) -> dict[str, set[str]]:
 		"""qualname -> the kinds of surface that run it directly."""
@@ -81,8 +75,8 @@ class Surface:
 		"""Every function a root reaches: {qualname: {"kinds": [...], "depth": n}}, where depth is
 		the fewest calls from any root (0 for a root)."""
 		out = defaultdict(set)
-		for e in self.edges():
-			out[e["caller"]].add(e["callee"])
+		for caller, callee, *_ in self.graph.iter_edges():
+			out[caller].add(callee)
 		kinds: dict[str, set[str]] = defaultdict(set)
 		depth: dict[str, int] = {}
 		queue = deque()
@@ -104,25 +98,30 @@ class Surface:
 	def reach(self, target: str, limit: int = 10, max_depth: int = 20) -> list[dict]:
 		"""Shortest routes from the roots to `target`, at most one per root."""
 		goal = self.graph._callable(target) or target
-		into = defaultdict(list)
-		for e in self.edges():
-			into[e["callee"]].append(e)
+		into: dict[str, list[Edge]] = defaultdict(list)
+		for e in self.graph.iter_edges():
+			into[e[1]].append(e)
 		roots = self.roots()
 		found = []
-		parent: dict[str, dict | None] = {goal: None}
+		parent: dict[str, Edge | None] = {goal: None}
 		queue = deque([(goal, 0)])
 		while queue and len(found) < limit:
 			node, d = queue.popleft()
 			if node in roots:
 				steps, cur = [], node
 				while parent[cur] is not None:
-					steps.append(parent[cur])
-					cur = parent[cur]["callee"]
+					steps.append(self._edge_dict(parent[cur]))
+					cur = parent[cur][1]
 				found.append({"root": node, "kinds": sorted(roots[node]), "depth": d, "steps": steps})
 			if d >= max_depth:
 				continue
-			for e in sorted(into.get(node, ()), key=lambda x: (x["path"], x["line"])):
-				if e["caller"] not in parent:
-					parent[e["caller"]] = e
-					queue.append((e["caller"], d + 1))
+			for e in sorted(into.get(node, ()), key=lambda x: (self.graph.file_path(x[4]), x[2])):
+				if e[0] not in parent:
+					parent[e[0]] = e
+					queue.append((e[0], d + 1))
 		return found
+
+	def _edge_dict(self, edge: Edge) -> dict:
+		caller, callee, line, kind, file_id = edge
+		path = self.graph.file_path(file_id)
+		return {"caller": caller, "callee": callee, "line": line, "kind": kind, "path": path}
