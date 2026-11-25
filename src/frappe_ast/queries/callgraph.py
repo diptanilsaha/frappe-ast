@@ -9,6 +9,8 @@ carries the mechanism as its kind:
 - `instance`: `x.m()` or `Cls(...).m()` where `x = Cls(...)` in the same function; `with x:` and
   `with Cls():` call `__enter__` and `__exit__` (`__aenter__` and `__aexit__` for `async with`).
 - `super`: `super().m()` or `super(Cls, self).m()` in a method of `Cls`, to `m` on its bases.
+- `property`: reading `x.p` (`self.p`, `Cls().p`, `doc.p`) where `p` is a `@property` or
+  `cached_property` of the receiver's class, and assigning it where `p` has a `@p.setter`.
 - `doc_method`: `doc.m()` on a document whose DocType the code names
   (`doc = frappe.get_doc("Sales Order", n)`), resolved on that DocType's controller class.
 - `lifecycle`: what the document layer runs for that call (`doc.save()` runs `validate`,
@@ -106,13 +108,17 @@ class CallGraph:
 			for target, kind in self.targets(c):
 				yield source, intern(target), c["line"], kind, c["file_id"]
 		for r in self.store.iter_rows(
-			"select r.kind, r.target, r.line, r.scope, r.file_id from refs r join files f on f.id = r.file_id "
-			f"where {refs} and r.kind in ('callback', 'method', 'dotted') and r.scope != '<module>'",
+			"select r.kind, r.target, r.via, r.access, r.line, r.scope, r.file_id from refs r "
+			f"join files f on f.id = r.file_id where {refs} "
+			"and r.kind in ('callback', 'method', 'dotted', 'attribute') and r.scope != '<module>'",
 			*params,
 		):
-			target = self._callable(r["target"])
+			if r["kind"] == "attribute":
+				target, kind = self._property(r["via"], r["target"], r["access"]), "property"
+			else:
+				target, kind = self._callable(r["target"]), REF_EDGE_KINDS[r["kind"]]
 			if target:
-				yield intern(r["scope"]), intern(target), r["line"], REF_EDGE_KINDS[r["kind"]], r["file_id"]
+				yield intern(r["scope"]), intern(target), r["line"], kind, r["file_id"]
 
 	def targets(self, c: dict) -> list[tuple[str, str]]:
 		"""(callee qualname, kind) for one calls row."""
@@ -165,6 +171,13 @@ class CallGraph:
 			if method in LIFECYCLE_METHODS:
 				found += self._lifecycle(doctype, LIFECYCLE_METHODS[method])
 		return found
+
+	def _property(self, receiver: str, name: str, access: str) -> str | None:
+		kind, _, cls = receiver.partition(":")
+		if kind == "doctype":
+			controller = self._controller(cls)
+			cls = controller["qualname"] if controller else ""
+		return self.classes.property_of(cls, name, access) if cls else None
 
 	def _lifecycle(self, doctype: str, operation: str) -> list[tuple[str, str]]:
 		found = []

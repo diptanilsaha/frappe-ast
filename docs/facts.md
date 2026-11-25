@@ -45,6 +45,7 @@ One row per reference a Frappe API makes. `target` and `via` depend on `kind`:
 | `realtime` | the event name | `access` is `publish` (Python) or `listen` (JS) |
 | `record_link` | `<kind>:<name>` | |
 | `monkey_patch` | the patched dotted path | the replacement: a dotted name, `<lambda>`, or `<function>.<name>` for a wrapper the patching function defines; queries count it only when the replacement is a function |
+| `attribute` | an attribute name read or assigned (`access` is `read` or `write`), not called; once per function, receiver and access | the receiver: `self:<class>` for `self.x` in a method of `<class>`, or a `calls.receiver` value (`call:...`, `doctype:<DocType>`); queries count it only when the attribute is a `@property` |
 | `callback` | a bench-app function named without being called | the call it is passed to (`frappe.enqueue`, `werkzeug.routing.Rule`), or `dict` when a dict holds it |
 
 `scope` is the enclosing symbol, and `access` says what the reference does (`read`, `write`,

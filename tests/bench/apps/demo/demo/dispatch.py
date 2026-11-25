@@ -144,6 +144,38 @@ def run_handlers():
 	return frappe.get_hooks("demo_handlers")
 
 
+class Conn:
+	@property
+	def session(self):
+		return self.open_session()
+
+	@session.setter
+	def session(self, value):
+		self.close_session()
+
+	def open_session(self):
+		return "s"
+
+	def close_session(self):
+		pass
+
+	def reuse(self):
+		return self.session
+
+
+def use_property():
+	return Conn().session
+
+
+def set_property():
+	conn = Conn()
+	conn.session = None
+
+
+def read_plain():
+	return Storage().ready
+
+
 class Lock:
 	def __enter__(self):
 		self.acquire()

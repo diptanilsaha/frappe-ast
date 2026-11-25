@@ -83,6 +83,15 @@ def test_call_receivers(analyze):
 	assert ("super().save", "super:demo.dispatch.ChildParser", "") in calls  # super(ChildParser, self)
 
 
+def test_attribute_refs(analyze):
+	# attribute reads and writes on a receiver of known type, for @property edges
+	refs = {(r.target, r.via, r.access, r.scope) for r in analyze(DISPATCH).refs("attribute")}
+	assert ("session", "call:demo.dispatch.Conn", "read", "demo.dispatch.use_property") in refs
+	assert ("session", "call:demo.dispatch.Conn", "write", "demo.dispatch.set_property") in refs
+	assert ("session", "self:demo.dispatch.Conn", "read", "demo.dispatch.Conn.reuse") in refs
+	assert not {r for r in refs if r[0] in ("run", "open_session")}  # a method call is a call
+
+
 def test_callback_refs(analyze):
 	refs = {(r.target, r.via, r.scope) for r in analyze(DISPATCH).refs("callback")}
 	assert ("demo.dispatch.job", "frappe.enqueue", "demo.dispatch.start_jobs") in refs

@@ -96,7 +96,8 @@ queries. [The index's facts](facts.md) gives the format of each column.
   in a package `__init__`); finds a DocType's controller class next to its JSON; looks a method
   up on a class and its bases, including bases in other apps.
 - **Call graph.** Turns `calls` rows and references into typed edges: plain calls, inherited
-  and overriding methods, `super()` calls, instances and `with` blocks, document methods, the document lifecycle, `doc_events`,
+  and overriding methods, `super()` calls, instances and `with` blocks, `@property` reads and
+  writes, document methods, the document lifecycle, `doc_events`,
   hook dispatch, typed module attributes, callbacks and dotted strings.
 - **Form resolution.** Works out which desk form a piece of JS runs on: the DocType folder,
   `doctype_js` hooks, `frappe.ui.form.on`, and for shared code, the forms that call it or
@@ -298,7 +299,7 @@ flowchart LR
 ```mermaid
 flowchart TD
   a["edges qualname [--kind] [--app]"] --> c["calls out of the function"]
-  a --> r["refs out of it: callbacks, dotted strings"]
+  a --> r["refs out of it: callbacks, dotted strings, attributes"]
   c --> t{"how the target is known"}
   t -->|"resolved name"| cl1["call · Cls() → __init__"]
   t -->|"self.m()"| inh["inherited · override (≤ 5 subclasses)"]
@@ -308,6 +309,7 @@ flowchart TD
   t -->|"typed module attribute"| prx["proxy"]
   t -->|"super().m()"| sup["super"]
   r --> ref["callback · dispatch · dotted"]
+  r -->|"attribute of a typed receiver"| prop["property"]
   cl1 --> out["path:line caller → callee kind"]
   inh --> out
   ins --> out
@@ -316,6 +318,7 @@ flowchart TD
   prx --> out
   sup --> out
   ref --> out
+  prop --> out
 ```
 
 ### `paths`

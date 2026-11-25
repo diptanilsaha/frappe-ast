@@ -42,7 +42,7 @@ It parses Python with `ast`, JS, TS and Vue with tree-sitter, and `hooks.py` and
 |---|---|
 | `method <dotted>` | Definition, overrides, patches, hooks, Python callers and client calls (`frappe.call`, `frm.call`, frappe-ui, URLs, Button fields). |
 | `callers` / `callees` | Python calls into or out of a symbol, resolved through imports and re-exports. |
-| `edges <fn>` / `paths <from> <to>` | The call graph: inherited and overriding methods, `super()`, `with` blocks, constructors, document lifecycle, `doc_events`, hook dispatch, functions passed to `frappe.enqueue`. |
+| `edges <fn>` / `paths <from> <to>` | The call graph: inherited and overriding methods, `super()`, `with` blocks, `@property` getters and setters, constructors, document lifecycle, `doc_events`, hook dispatch, functions passed to `frappe.enqueue`. |
 | `flow <fn> [--follow]` | Where a function's parameters and request input go: each call and argument they reach, unchanged or through what, and on into the functions they are passed to. |
 | `surface` / `reach <fn>` | Functions that requests, pages, documents, hooks and jobs run directly, and the route from each to a function. |
 | `doctype <name>` | Controller and its bases, `doc_events`, overrides, schema, links and the client code that names its fields. |

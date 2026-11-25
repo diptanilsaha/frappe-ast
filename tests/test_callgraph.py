@@ -39,6 +39,10 @@ def edges_from(graph, caller):
 		("demo.dispatch.safe_globals", "demo.dispatch.sandboxed", "callback"),  # {"run": sandboxed}
 		("demo.dispatch.start_jobs", "demo.dispatch.by_string", "dispatch"),  # frappe.enqueue("a.b.c")
 		("demo.dispatch.configure", "demo.dispatch.setup", "dotted"),
+		("demo.dispatch.use_property", "demo.dispatch.Conn.session", "property"),  # Conn().session
+		("demo.dispatch.set_property", "demo.dispatch.Conn.session", "property"),  # @session.setter
+		("demo.dispatch.Conn.reuse", "demo.dispatch.Conn.session", "property"),  # self.session
+		("demo.dispatch.Conn.session", "demo.dispatch.Conn.open_session", "call"),
 		("demo.dispatch.use_with", "demo.dispatch.Lock.__enter__", "instance"),  # with Lock():
 		("demo.dispatch.use_with", "demo.dispatch.Lock.__exit__", "instance"),
 		("demo.dispatch.use_with_bound", "demo.dispatch.Lock.__exit__", "instance"),  # with lock:
@@ -61,6 +65,7 @@ def test_override_keeps_the_base_method(graph):
 	[
 		("demo.dispatch.rebound", {"instance"}),  # rebinding the name forgets the type
 		("demo.dispatch.unknown_doc", {"lifecycle", "doc_event"}),  # DocType not a literal
+		("demo.dispatch.read_plain", {"property"}),  # Storage().ready is not a property
 	],
 )
 def test_no_edge_without_a_type(graph, caller, kinds):

@@ -1,5 +1,6 @@
-"""Methods of indexed Python classes: through bases, monkey patches and `super()`."""
+"""Methods of indexed Python classes: through bases, monkey patches, `super()` and `@property`."""
 
+import json
 from collections import defaultdict
 
 from frappe_ast.queries.resolver import Resolver, _bases
@@ -18,6 +19,12 @@ class Classes:
 		self._patches = defaultdict(list)  # patched dotted path -> replacements
 		for r in store.rows("select target, via from refs where kind = 'monkey_patch'"):
 			self._patches[r["target"]].append(r["via"])
+		self._properties = defaultdict(set)  # qualname -> {"read", "write"}
+		for r in store.rows(
+			"select qualname, decorators from symbols where kind = 'method' "
+			"and (decorators like '%property%' or decorators like '%.setter%')"
+		):
+			self._properties[r["qualname"]] |= _property_access(r["decorators"])
 		self._methods: dict[tuple[str, str], str | None] = {}
 		self._classes: dict[str, dict | None] = {}
 
@@ -52,6 +59,11 @@ class Classes:
 				return found
 		return None
 
+	def property_of(self, cls_qualname: str, name: str, access: str) -> str | None:
+		"""The @property (getter for "read", setter for "write") that `obj.name` runs."""
+		method = self.method_of(cls_qualname, name)
+		return method if method and access in self._properties.get(method, ()) else None
+
 	def class_(self, qualname: str) -> dict | None:
 		if qualname not in self._classes:
 			symbol = self.resolver.symbol(qualname)
@@ -72,3 +84,14 @@ class Classes:
 				if found:
 					return found
 		return None
+
+
+def _property_access(decorators: str) -> set[str]:
+	"""A getter's and setter's def share a qualname, so one method can be both."""
+	found = set()
+	for deco in json.loads(decorators):
+		if deco.endswith("property"):  # property, cached_property, functools.cached_property
+			found.add("read")
+		elif deco.endswith(".setter"):
+			found.add("write")
+	return found

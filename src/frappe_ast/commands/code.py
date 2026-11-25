@@ -66,7 +66,7 @@ class CalleesCommand(Command):
 
 
 class EdgesCommand(Command):
-	help = "the resolved call graph out of a symbol or app: calls, inherited, overriding, super() and instance methods, with blocks, document lifecycle, doc_events, hook dispatch and functions passed by reference"
+	help = "the resolved call graph out of a symbol or app: calls, inherited, overriding, super() and instance methods, with blocks, @property access, document lifecycle, doc_events, hook dispatch and functions passed by reference"
 
 	def arguments(self, p):
 		p.add_argument("target", nargs="?", help="a caller qualname; omit with --app to list every edge")

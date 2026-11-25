@@ -54,6 +54,7 @@ class _ModuleVisitor(ast.NodeVisitor):
 		self.local_defs: list[set[str]] = [set()]  # functions each enclosing def defines directly
 		# what each name is bound to, per def scope (module first): see Call.receiver
 		self.bindings: list[dict[str, str]] = [{}]
+		self.attributes: set[tuple[str, str, str, str]] = set()  # attribute refs already recorded
 
 	@property
 	def qual_scope(self) -> str:
@@ -106,7 +107,10 @@ class _ModuleVisitor(ast.NodeVisitor):
 			self._custom_fields(custom_fields.from_call(node, resolved or callee))
 			if callee == "setattr":
 				self.facts.refs += self.patches.from_setattr(node, self.qual_scope, self.local_defs[-1])
-		self.generic_visit(node)
+		# The called attribute is a call, not an attribute read: visit only what it is taken from.
+		func = node.func
+		for child in [func.value if isinstance(func, ast.Attribute) else func, *node.args, *node.keywords]:
+			self.visit(child)
 
 	def visit_With(self, node: ast.With | ast.AsyncWith):
 		enter, exit = (
@@ -126,6 +130,22 @@ class _ModuleVisitor(ast.NodeVisitor):
 		self.generic_visit(node)
 
 	visit_AsyncWith = visit_With
+
+	def visit_Attribute(self, node: ast.Attribute):
+		"""An attribute read or written on a receiver of known type: a @property runs code there."""
+		base = node.value
+		if isinstance(base, ast.Name) and base.id == "self":
+			cls = self._class_qualname()
+			via = f"self:{cls}" if cls else ""
+		else:
+			via = self._value_type(base)
+		if via and via != "doctype:?" and not isinstance(node.ctx, ast.Del):
+			access = "read" if isinstance(node.ctx, ast.Load) else "write"
+			key = (self.qual_scope, node.attr, via, access)
+			if key not in self.attributes:  # the first use in a function is enough for an edge
+				self.attributes.add(key)
+				self.facts.refs.append(Ref("attribute", node.attr, via, node.lineno, self.qual_scope, access))
+		self.generic_visit(node)
 
 	def visit_Assign(self, node: ast.Assign):
 		self.facts.refs += self.patches.from_assign(node, self.qual_scope, self.local_defs[-1])
