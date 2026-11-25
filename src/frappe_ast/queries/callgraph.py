@@ -35,6 +35,8 @@ connect to every `validate` on the bench.
 """
 
 from collections import defaultdict, deque
+from collections.abc import Iterator
+from sys import intern
 
 from frappe_ast.python.frappe_api import HOOK_READER_APIS, LIFECYCLE_APIS, LIFECYCLE_EVENTS
 from frappe_ast.queries.resolver import Resolver, _bases
@@ -50,6 +52,8 @@ REF_EDGE_KINDS = {"callback": "callback", "method": "dispatch", "dotted": "dotte
 # Document methods that start a lifecycle, by the name the code calls.
 LIFECYCLE_METHODS = {name: name for name in LIFECYCLE_EVENTS}
 
+Edge = tuple[str, str, int, str, int]  # caller, callee, line, kind, file_id
+
 
 class CallGraph:
 	def __init__(self, store: Store):
@@ -61,6 +65,7 @@ class CallGraph:
 		self._symbols: dict[str, str] = {}  # qualname -> kind, for callable symbols
 		self._subclasses: dict[str, list[str]] | None = None  # class -> direct subclasses
 		self._bases: dict[tuple[str, str], str] = {}
+		self._paths: dict[int, str] | None = None  # file id -> path
 		for r in store.rows(
 			"select s.qualname, s.kind from symbols s join files f on f.id = s.file_id "
 			"where f.lang = 'python' and s.kind in ('function', 'method', 'class')"
@@ -81,40 +86,36 @@ class CallGraph:
 
 	# ---- edges -----------------------------------------------------------------------------
 
-	def edges(self, apps: list[str] | None = None) -> list[dict]:
-		"""Every edge out of a caller in `apps` (all apps when empty)."""
-		where, params = "f.lang = 'python'", []
-		if apps:
-			where += f" and f.app in ({','.join('?' * len(apps))})"
-			params += apps
-		out = []
-		for c in self.store.rows(
-			"select c.caller, c.callee, c.resolved, c.line, c.receiver, c.arg, f.path from calls c "
-			f"join files f on f.id = c.file_id where {where}",
+	def edges(self, apps: list[str] | None = None, caller: str = "") -> list[dict]:
+		"""Every edge out of `caller`, or out of each caller in `apps` (all apps when both are empty)."""
+		paths = self._file_paths()
+		return [
+			{"caller": c, "callee": callee, "line": line, "kind": kind, "path": paths[file_id]}
+			for c, callee, line, kind, file_id in self.iter_edges(apps, caller)
+		]
+
+	def iter_edges(self, apps: list[str] | None = None, caller: str = "") -> Iterator[Edge]:
+		"""`edges` as (caller, callee, line, kind, file_id) tuples, read row by row: only this compact
+		does the bench-wide graph fit in memory."""
+		where, params = "f.lang = 'python'", [*(apps or ()), *([caller] if caller else ())]
+		where += f" and f.app in ({','.join('?' * len(apps))})" if apps else ""
+		calls, refs = (f"{where} and c.caller = ?", f"{where} and r.scope = ?") if caller else (where, where)
+		for c in self.store.iter_rows(
+			"select c.caller, c.callee, c.resolved, c.line, c.receiver, c.arg, c.file_id from calls c "
+			f"join files f on f.id = c.file_id where {calls}",
 			*params,
 		):
-			out += [
-				{"caller": c["caller"], "callee": target, "line": c["line"], "kind": kind, "path": c["path"]}
-				for target, kind in self.targets(c)
-			]
-		for r in self.store.rows(
-			"select r.kind, r.target, r.line, r.scope, f.path from refs r join files f on f.id = r.file_id "
-			f"where {where} and r.kind in ('callback', 'method', 'dotted') and r.scope != '<module>'",
+			source = intern(c["caller"])
+			for target, kind in self.targets(c):
+				yield source, intern(target), c["line"], kind, c["file_id"]
+		for r in self.store.iter_rows(
+			"select r.kind, r.target, r.line, r.scope, r.file_id from refs r join files f on f.id = r.file_id "
+			f"where {refs} and r.kind in ('callback', 'method', 'dotted') and r.scope != '<module>'",
 			*params,
 		):
 			target = self._callable(r["target"])
 			if target:
-				kind = REF_EDGE_KINDS[r["kind"]]
-				out.append(
-					{
-						"caller": r["scope"],
-						"callee": target,
-						"line": r["line"],
-						"kind": kind,
-						"path": r["path"],
-					}
-				)
-		return out
+				yield intern(r["scope"]), intern(target), r["line"], REF_EDGE_KINDS[r["kind"]], r["file_id"]
 
 	def targets(self, c: dict) -> list[tuple[str, str]]:
 		"""(callee qualname, kind) for one calls row."""
@@ -262,16 +263,16 @@ class CallGraph:
 		"""Shortest call paths from `source` to `target`, as lists of edges."""
 		start = self._callable(source) or source
 		goal = self._callable(target) or target
-		out_edges = defaultdict(list)
-		for e in self.edges():
-			out_edges[e["caller"]].append(e)
+		out_edges: dict[str, list[dict]] = {}  # filled per node as the search reaches it
 		found, queue = [], deque([(start, [])])
 		seen_depth = {start: 0}
 		while queue and len(found) < limit:
 			node, path = queue.popleft()
 			if len(path) >= max_depth:
 				continue
-			for e in sorted(out_edges.get(node, ()), key=lambda x: x["line"]):
+			if node not in out_edges:
+				out_edges[node] = sorted(self.edges(caller=node), key=lambda x: x["line"])
+			for e in out_edges[node]:
 				nxt = e["callee"]
 				step = [*path, e]
 				if nxt == goal:
@@ -283,3 +284,11 @@ class CallGraph:
 					seen_depth[nxt] = len(step)
 					queue.append((nxt, step))
 		return found
+
+	def file_path(self, file_id: int) -> str:
+		return self._file_paths()[file_id]
+
+	def _file_paths(self) -> dict[int, str]:
+		if self._paths is None:
+			self._paths = {r["id"]: r["path"] for r in self.store.rows("select id, path from files")}
+		return self._paths

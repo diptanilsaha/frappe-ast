@@ -78,9 +78,7 @@ class EdgesCommand(Command):
 
 	def run(self, ctx, args):
 		graph = CallGraph(ctx.store())
-		edges = graph.edges(args.app or None)
-		if args.target:
-			edges = [e for e in edges if e["caller"] == args.target]
+		edges = graph.edges(args.app or None, args.target or "")
 		if args.kind:
 			edges = [e for e in edges if e["kind"] == args.kind]
 		edges.sort(key=lambda e: (e["path"], e["line"]))

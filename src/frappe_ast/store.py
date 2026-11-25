@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import sqlite3
+from collections.abc import Iterator
 from pathlib import Path
 
 from frappe_ast.model import FileFacts
@@ -49,8 +50,10 @@ create index if not exists ix_sym_file on symbols(file_id);
 create index if not exists ix_calls_callee on calls(callee);
 create index if not exists ix_calls_resolved on calls(resolved);
 create index if not exists ix_calls_file on calls(file_id);
+create index if not exists ix_calls_caller on calls(caller);
 create index if not exists ix_refs_target on refs(kind, target);
 create index if not exists ix_refs_file on refs(file_id);
+create index if not exists ix_refs_scope on refs(scope);
 create index if not exists ix_findings_file on findings(file_id);
 create index if not exists ix_hooks_value on hooks(value);
 create index if not exists ix_fields_dt on fields(doctype);
@@ -83,6 +86,11 @@ class Store:
 
 	def rows(self, sql: str, *params) -> list[dict]:
 		return [dict(r) for r in self.db.execute(sql, params)]
+
+	def iter_rows(self, sql: str, *params) -> Iterator[dict]:
+		"""Rows one at a time, for scans of a whole table that `rows` would hold in memory at once."""
+		for r in self.db.execute(sql, params):
+			yield dict(r)
 
 	def file_stamps(self) -> dict[str, tuple[int, float, int, str]]:
 		return {

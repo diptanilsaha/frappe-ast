@@ -320,8 +320,8 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-  a["paths from to [--depth n]"] --> g["every edge of the call graph"]
-  g --> bfs["breadth-first search from 'from',<br/>up to --depth calls"]
+  a["paths from to [--depth n]"] --> bfs["breadth-first search from 'from',<br/>up to --depth calls"]
+  bfs <--> g["edges out of each function it reaches,<br/>read when the search gets there"]
   bfs --> out["shortest routes first,<br/>each step with its edge kind"]
 ```
 
