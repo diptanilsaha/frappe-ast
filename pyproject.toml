@@ -4,11 +4,17 @@ version = "0.2.6"
 description = "Static index of a Frappe bench that shows how its code connects: who calls a method, what runs when a document saves or a form field changes, where request input goes, broken hooks and fields, and what a diff touches. It reads Python, JS, Vue, hooks.py and DocType JSON, and never runs app code."
 readme = "README.md"
 requires-python = ">=3.11"
+authors = [{ name = "Diptanil Saha", email = "diptanil.dev@gmail.com" }]
+keywords = ["frappe", "erpnext", "static-analysis", "call-graph", "code-index", "agents"]
 dependencies = [
     "tree-sitter>=0.25",
     "tree-sitter-javascript>=0.25",
     "tree-sitter-typescript>=0.23",
 ]
+
+[project.urls]
+Repository = "https://github.com/diptanilsaha/frappe-ast"
+Issues = "https://github.com/diptanilsaha/frappe-ast/issues"
 
 [project.scripts]
 frappe-ast = "frappe_ast.cli:main"

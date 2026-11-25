@@ -1,4 +1,8 @@
-"""frappe-ast: AST index and queries for a Frappe bench."""
+"""frappe-ast: a static index of a Frappe bench that shows how its code connects.
+
+It answers who calls a method, what runs when a document saves or a form field changes, where
+request input goes, which hooks and fields are broken, and what a diff touches. It reads Python,
+JS, Vue, hooks.py and DocType JSON, and never runs app code."""
 
 import argparse
 import sqlite3
