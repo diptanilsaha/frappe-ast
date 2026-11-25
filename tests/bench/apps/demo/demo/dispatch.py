@@ -144,6 +144,43 @@ def run_handlers():
 	return frappe.get_hooks("demo_handlers")
 
 
+class Lock:
+	def __enter__(self):
+		self.acquire()
+		return self
+
+	def __exit__(self, *exc):
+		self.release()
+
+	async def __aenter__(self):
+		return self
+
+	async def __aexit__(self, *exc):
+		pass
+
+	def acquire(self):
+		pass
+
+	def release(self):
+		pass
+
+
+def use_with():
+	with Lock():
+		pass
+
+
+def use_with_bound():
+	lock = Lock()
+	with lock:
+		pass
+
+
+async def use_async_with():
+	async with Lock():
+		pass
+
+
 class Parser:
 	def __init__(self, content):
 		self.parse(content)

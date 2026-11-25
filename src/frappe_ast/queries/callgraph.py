@@ -6,7 +6,8 @@ carries the mechanism as its kind:
 
 - `call`: a resolved call (re-exports followed); calling a class runs its `__init__`.
 - `inherited`: `self.m()` where `m` is defined on a base class, not the class itself.
-- `instance`: `x.m()` or `Cls(...).m()` where `x = Cls(...)` in the same function.
+- `instance`: `x.m()` or `Cls(...).m()` where `x = Cls(...)` in the same function; `with x:` and
+  `with Cls():` call `__enter__` and `__exit__` (`__aenter__` and `__aexit__` for `async with`).
 - `super`: `super().m()` or `super(Cls, self).m()` in a method of `Cls`, to `m` on its bases.
 - `doc_method`: `doc.m()` on a document whose DocType the code names
   (`doc = frappe.get_doc("Sales Order", n)`), resolved on that DocType's controller class.

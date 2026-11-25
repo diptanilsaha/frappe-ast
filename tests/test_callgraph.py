@@ -39,6 +39,10 @@ def edges_from(graph, caller):
 		("demo.dispatch.safe_globals", "demo.dispatch.sandboxed", "callback"),  # {"run": sandboxed}
 		("demo.dispatch.start_jobs", "demo.dispatch.by_string", "dispatch"),  # frappe.enqueue("a.b.c")
 		("demo.dispatch.configure", "demo.dispatch.setup", "dotted"),
+		("demo.dispatch.use_with", "demo.dispatch.Lock.__enter__", "instance"),  # with Lock():
+		("demo.dispatch.use_with", "demo.dispatch.Lock.__exit__", "instance"),
+		("demo.dispatch.use_with_bound", "demo.dispatch.Lock.__exit__", "instance"),  # with lock:
+		("demo.dispatch.use_async_with", "demo.dispatch.Lock.__aenter__", "instance"),
 		("demo.dispatch.ChildParser.__init__", "demo.dispatch.Parser.__init__", "super"),
 		("demo.dispatch.ChildParser.save", "demo.dispatch.Parser.save", "super"),  # super(C, self)
 		("demo.dispatch.GrandParser.parse", "demo.dispatch.Parser.parse", "super"),  # skips a base

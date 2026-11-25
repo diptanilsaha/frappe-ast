@@ -108,6 +108,25 @@ class _ModuleVisitor(ast.NodeVisitor):
 				self.facts.refs += self.patches.from_setattr(node, self.qual_scope, self.local_defs[-1])
 		self.generic_visit(node)
 
+	def visit_With(self, node: ast.With | ast.AsyncWith):
+		enter, exit = (
+			("__aenter__", "__aexit__") if isinstance(node, ast.AsyncWith) else ("__enter__", "__exit__")
+		)
+		for item in node.items:
+			expr = item.context_expr
+			receiver = self._value_type(expr)
+			inner = dotted(expr.func) if isinstance(expr, ast.Call) else dotted(expr)
+			if not receiver.startswith("call:") or not inner:
+				continue
+			text = f"{inner}()" if isinstance(expr, ast.Call) else inner
+			for method in (enter, exit):
+				callee = f"{text}.{method}"
+				resolved = "" if "()" in callee else self._resolve_callee(callee)
+				self.facts.calls.append(Call(self.qual_scope, callee, resolved, node.lineno, receiver))
+		self.generic_visit(node)
+
+	visit_AsyncWith = visit_With
+
 	def visit_Assign(self, node: ast.Assign):
 		self.facts.refs += self.patches.from_assign(node, self.qual_scope, self.local_defs[-1])
 		self.generic_visit(node)

@@ -96,7 +96,7 @@ queries. [The index's facts](facts.md) gives the format of each column.
   in a package `__init__`); finds a DocType's controller class next to its JSON; looks a method
   up on a class and its bases, including bases in other apps.
 - **Call graph.** Turns `calls` rows and references into typed edges: plain calls, inherited
-  and overriding methods, `super()` calls, instances, document methods, the document lifecycle, `doc_events`,
+  and overriding methods, `super()` calls, instances and `with` blocks, document methods, the document lifecycle, `doc_events`,
   hook dispatch, typed module attributes, callbacks and dotted strings.
 - **Form resolution.** Works out which desk form a piece of JS runs on: the DocType folder,
   `doctype_js` hooks, `frappe.ui.form.on`, and for shared code, the forms that call it or
@@ -302,7 +302,7 @@ flowchart TD
   c --> t{"how the target is known"}
   t -->|"resolved name"| cl1["call · Cls() → __init__"]
   t -->|"self.m()"| inh["inherited · override (≤ 5 subclasses)"]
-  t -->|"x = Cls() then x.m()"| ins["instance"]
+  t -->|"x = Cls() then x.m(), with x:"| ins["instance"]
   t -->|"doc of a named DocType"| doc["doc_method · lifecycle · doc_event"]
   t -->|"frappe.get_hooks('key')"| hook["hook → each function under the key"]
   t -->|"typed module attribute"| prx["proxy"]

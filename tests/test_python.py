@@ -76,6 +76,9 @@ def test_call_receivers(analyze):
 	assert ("doc.save", "doctype:?", "") in calls
 	assert ("frappe.get_hooks", "", "permission_query_conditions") in calls
 	assert ("frappe.db.sql", "", "") in calls  # a multi-line SQL string is not a name
+	assert ("Lock().__enter__", "call:demo.dispatch.Lock", "") in calls  # with Lock():
+	assert ("lock.__exit__", "call:demo.dispatch.Lock", "") in calls
+	assert ("Lock().__aexit__", "call:demo.dispatch.Lock", "") in calls  # async with
 	assert ("super().__init__", "super:demo.dispatch.ChildParser", "") in calls
 	assert ("super().save", "super:demo.dispatch.ChildParser", "") in calls  # super(ChildParser, self)
 
