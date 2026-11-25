@@ -49,6 +49,7 @@ the controller's `on_cancel`, and four `doc_events` handlers registered for ever
 | `inherited` | `self.update_blanket_order()` | the method on a base class |
 | `override` | `self.write()` in a base class | each subclass's own `write`, up to five subclasses |
 | `instance` | `engine = Engine(); engine.run()` | `Engine.run` |
+| `super` | `super().validate()`, `super(Cls, self).save()` | the method on the nearest base class that defines it |
 | `doc_method` | `doc = frappe.get_doc("Sales Order", n); doc.update_status(s)` | the method on that DocType's controller |
 | `lifecycle` | `doc.save()`, `doc.cancel()`, `frappe.delete_doc("X", n)` | the controller methods the document layer runs for it (`validate`, `on_update`, `on_cancel`, ...) |
 | `doc_event` | the same calls | `hooks.py` `doc_events` handlers for that DocType and for `"*"`, from every app |

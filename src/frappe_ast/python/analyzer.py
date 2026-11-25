@@ -2,9 +2,10 @@
 
 import ast
 
-from frappe_ast.model import Call, FileFacts, Ref, Symbol
+from frappe_ast.model import Call, FileFacts, Ref
 from frappe_ast.python import compat, custom_fields
-from frappe_ast.python.astutil import dotted, literal_text, short_literal, truthy
+from frappe_ast.python.aliases import module_aliases
+from frappe_ast.python.astutil import dotted, short_literal
 from frappe_ast.python.checks import PythonChecks
 from frappe_ast.python.flows import FunctionFlows
 from frappe_ast.python.frappe_api import (
@@ -17,8 +18,9 @@ from frappe_ast.python.frappe_api import (
 	doctype_arg,
 	realtime_event,
 )
-from frappe_ast.python.imports import ImportMap, annotation_types
+from frappe_ast.python.imports import ImportMap
 from frappe_ast.python.patches import PatchRefs
+from frappe_ast.python.symbols import function_signature, make_symbol
 
 
 class PythonAnalyzer:
@@ -36,55 +38,9 @@ class PythonAnalyzer:
 		# Custom field lists are rare; skip the extra tree walk in files that cannot hold one.
 		lists = custom_fields.FieldLists(tree if "fieldname" in source else ast.Module(body=[]))
 		_ModuleVisitor(facts, imports, self.known_apps, lists).visit(tree)
-		facts.symbols.extend(self._aliases(tree, imports, module))
+		facts.symbols.extend(module_aliases(tree, imports, module))
 		facts.findings = PythonChecks(imports).run(tree)
 		return facts
-
-	def _aliases(self, tree: ast.Module, imports: ImportMap, module: str) -> list[Symbol]:
-		"""Module-level `from x import y` makes `module.y` a valid dotted path (re-export)."""
-		aliases = []
-		for node in tree.body:
-			if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-				types = annotation_types(node.annotation, imports, module)
-				if types:
-					name = node.target.id
-					aliases.append(
-						Symbol(
-							name,
-							f"{module}.{name}",
-							"variable",
-							node.lineno,
-							node.lineno,
-							signature="|".join(types),
-						)
-					)
-				continue
-			if (
-				isinstance(node, ast.Assign)
-				and len(node.targets) == 1
-				and isinstance(node.targets[0], ast.Name)
-			):
-				# `execute = Report.execute`: a module-level name bound to another callable.
-				value = dotted(node.value) if isinstance(node.value, (ast.Name, ast.Attribute)) else ""
-				if value:
-					target = imports.resolve(value) or f"{module}.{value}"
-					name = node.targets[0].id
-					aliases.append(
-						Symbol(name, f"{module}.{name}", "alias", node.lineno, node.lineno, signature=target)
-					)
-				continue
-			if not isinstance(node, ast.ImportFrom):
-				continue
-			for alias in node.names:
-				local = alias.asname or alias.name
-				if alias.name != "*":
-					target = imports.names.get(local, "")
-					aliases.append(
-						Symbol(
-							local, f"{module}.{local}", "alias", node.lineno, node.lineno, signature=target
-						)
-					)
-		return aliases
 
 
 class _ModuleVisitor(ast.NodeVisitor):
@@ -114,7 +70,7 @@ class _ModuleVisitor(ast.NodeVisitor):
 
 	def visit_FunctionDef(self, node):
 		in_class = bool(self.scope) and self.scope[-1][0] == "class"
-		self._add_symbol(node, "method" if in_class else "function", signature=_signature(node))
+		self._add_symbol(node, "method" if in_class else "function", signature=function_signature(node))
 		self.scope.append(("def", node.name))
 		self.local_defs.append(
 			{c.name for c in node.body if isinstance(c, ast.FunctionDef | ast.AsyncFunctionDef)}
@@ -185,10 +141,30 @@ class _ModuleVisitor(ast.NodeVisitor):
 		if not isinstance(node, ast.Call):
 			return ""
 		callee = dotted(node.func)
+		if callee == "super" and "super" not in self.imports.names:
+			return self._super_receiver(node)
 		resolved = self._resolve_callee(callee) if callee else ""
 		if (resolved or callee) in DOC_LOADER_APIS:
 			return f"doctype:{doctype_arg(node, resolved or callee) or '?'}"
 		return f"call:{resolved}" if resolved else ""
+
+	def _super_receiver(self, node: ast.Call) -> str:
+		"""`super()` in a method of C, or `super(C, self)`: "super:<C>"."""
+		named = dotted(node.args[0]) if node.args else ""
+		cls = (
+			(self._resolve_callee(named) or f"{self.facts.module}.{named}")
+			if named
+			else self._class_qualname()
+		)
+		return f"super:{cls}" if cls else ""
+
+	def _class_qualname(self) -> str:
+		"""The innermost enclosing class, by its qualname."""
+		names = [name for _, name in self.scope]
+		for i in range(len(self.scope) - 1, -1, -1):
+			if self.scope[i][0] == "class":
+				return ".".join([self.facts.module, *names[: i + 1]])
+		return ""
 
 	def visit_Import(self, node: ast.Import):
 		for alias in node.names:
@@ -235,34 +211,9 @@ class _ModuleVisitor(ast.NodeVisitor):
 			self.facts.refs.append(Ref("dotted", method, via, node.lineno, self.qual_scope, "call"))
 
 	def _add_symbol(self, node, kind: str, signature: str):
-		decorators = [ast.unparse(d) for d in node.decorator_list]
+		qualname = f"{self.qual_scope if self.scope else self.facts.module}.{node.name}"
 		parent = self.qual_scope if self.scope else ""
-		sym = Symbol(
-			name=node.name,
-			qualname=f"{self.qual_scope if self.scope else self.facts.module}.{node.name}",
-			kind=kind,
-			line=node.lineno,
-			end_line=node.end_lineno or node.lineno,
-			signature=signature,
-			parent=parent,
-			doc=_first_doc_line(node),
-			decorators=decorators,
-		)
-		self._apply_whitelist(sym, node.decorator_list)
-		self.facts.symbols.append(sym)
-
-	def _apply_whitelist(self, sym: Symbol, decorators: list[ast.expr]):
-		for deco in decorators:
-			target = deco.func if isinstance(deco, ast.Call) else deco
-			name = dotted(target)
-			if not name or (self.imports.resolve(name) or name) != "frappe.whitelist":
-				continue
-			sym.whitelisted = True
-			for kw in deco.keywords if isinstance(deco, ast.Call) else []:
-				if kw.arg == "allow_guest":
-					sym.allow_guest = truthy(kw.value)
-				elif kw.arg == "methods":
-					sym.http_methods = literal_text(kw.value)
+		self.facts.symbols.append(make_symbol(node, kind, qualname, parent, signature, self.imports))
 
 	def _resolve_callee(self, callee: str) -> str:
 		head, _, rest = callee.partition(".")
@@ -286,14 +237,3 @@ class _ModuleVisitor(ast.NodeVisitor):
 			if isinstance(target, str):
 				line = node.args[0].lineno
 				self.facts.refs.append(Ref("method", target, api, line, self.qual_scope, "call"))
-
-
-def _signature(node) -> str:
-	text = ast.unparse(node.args)
-	returns = f" -> {ast.unparse(node.returns)}" if node.returns else ""
-	return f"({text}){returns}"
-
-
-def _first_doc_line(node) -> str:
-	doc = ast.get_docstring(node, clean=True)
-	return doc.strip().splitlines()[0][:160] if doc else ""

@@ -39,6 +39,9 @@ def edges_from(graph, caller):
 		("demo.dispatch.safe_globals", "demo.dispatch.sandboxed", "callback"),  # {"run": sandboxed}
 		("demo.dispatch.start_jobs", "demo.dispatch.by_string", "dispatch"),  # frappe.enqueue("a.b.c")
 		("demo.dispatch.configure", "demo.dispatch.setup", "dotted"),
+		("demo.dispatch.ChildParser.__init__", "demo.dispatch.Parser.__init__", "super"),
+		("demo.dispatch.ChildParser.save", "demo.dispatch.Parser.save", "super"),  # super(C, self)
+		("demo.dispatch.GrandParser.parse", "demo.dispatch.Parser.parse", "super"),  # skips a base
 	],
 )
 def test_edge_kinds(graph, caller, callee, kind):

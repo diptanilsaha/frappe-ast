@@ -11,7 +11,7 @@ this page says what the values in them mean.
 | `caller` | qualname of the enclosing function, or `<module>` |
 | `callee` | the callee as written: `frappe.get_doc`, `doc.save`, `Engine().run` for a method on a call's result |
 | `resolved` | the absolute dotted target through imports and `self.` / `cls.`, `""` when unknown |
-| `receiver` | what the call is made on: `doctype:<DocType>` for a document from `frappe.get_doc` and friends (`doctype:?` when the DocType is not a literal), `call:<dotted>` for the result of calling `<dotted>` (an instance when it is a class), `""` otherwise |
+| `receiver` | what the call is made on: `doctype:<DocType>` for a document from `frappe.get_doc` and friends (`doctype:?` when the DocType is not a literal), `call:<dotted>` for the result of calling `<dotted>` (an instance when it is a class), `super:<class>` for `super()` in a method of `<class>` or `super(<class>, self)`, `""` otherwise |
 | `arg` | the first positional argument when it is a short string literal |
 
 ## `refs`

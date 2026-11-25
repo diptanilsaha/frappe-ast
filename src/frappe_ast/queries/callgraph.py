@@ -7,6 +7,7 @@ carries the mechanism as its kind:
 - `call`: a resolved call (re-exports followed); calling a class runs its `__init__`.
 - `inherited`: `self.m()` where `m` is defined on a base class, not the class itself.
 - `instance`: `x.m()` or `Cls(...).m()` where `x = Cls(...)` in the same function.
+- `super`: `super().m()` or `super(Cls, self).m()` in a method of `Cls`, to `m` on its bases.
 - `doc_method`: `doc.m()` on a document whose DocType the code names
   (`doc = frappe.get_doc("Sales Order", n)`), resolved on that DocType's controller class.
 - `lifecycle`: what the document layer runs for that call (`doc.save()` runs `validate`,
@@ -39,6 +40,7 @@ from collections.abc import Iterator
 from sys import intern
 
 from frappe_ast.python.frappe_api import HOOK_READER_APIS, LIFECYCLE_APIS, LIFECYCLE_EVENTS
+from frappe_ast.queries.classes import Classes
 from frappe_ast.queries.resolver import Resolver, _bases
 from frappe_ast.store import Store
 
@@ -59,27 +61,21 @@ class CallGraph:
 	def __init__(self, store: Store):
 		self.store = store
 		self.resolver = Resolver(store)
-		self._methods: dict[tuple[str, str], str | None] = {}
-		self._classes: dict[str, dict | None] = {}
+		self.classes = Classes(store, self.resolver)
+		self._symbols = self.classes.symbols  # qualname -> kind, for callable symbols
+		self._method_of = self.classes.method_of
+		self._class = self.classes.class_
+		self._callable = self.classes.callable
 		self._controllers: dict[str, dict | None] = {}
-		self._symbols: dict[str, str] = {}  # qualname -> kind, for callable symbols
 		self._subclasses: dict[str, list[str]] | None = None  # class -> direct subclasses
 		self._bases: dict[tuple[str, str], str] = {}
 		self._paths: dict[int, str] | None = None  # file id -> path
-		for r in store.rows(
-			"select s.qualname, s.kind from symbols s join files f on f.id = s.file_id "
-			"where f.lang = 'python' and s.kind in ('function', 'method', 'class')"
-		):
-			self._symbols.setdefault(r["qualname"], r["kind"])
 		self._variables = {
 			r["qualname"]: r["signature"].split("|")
 			for r in store.rows(
 				"select qualname, signature from symbols where kind = 'variable' and signature != ''"
 			)
 		}
-		self._patches = defaultdict(list)  # patched dotted path -> replacements
-		for r in store.rows("select target, via from refs where kind = 'monkey_patch'"):
-			self._patches[r["target"]].append(r["via"])
 		self._hooks = defaultdict(list)  # key -> [(p1, p2, value)]
 		for h in store.rows("select key, p1, p2, value from hooks"):
 			self._hooks[h["key"]].append((h["p1"] or "", h["p2"] or "", h["value"]))
@@ -154,6 +150,10 @@ class CallGraph:
 				target = self._method_of(cls, method)
 				if target:
 					found.append((target, "instance"))
+		elif receiver.startswith("super:"):
+			target = self.classes.super_method(receiver[6:], method)
+			if target:
+				found.append((target, "super"))
 		elif receiver.startswith("doctype:") and receiver != "doctype:?":
 			doctype = receiver[8:]
 			controller = self._controller(doctype)
@@ -209,47 +209,6 @@ class CallGraph:
 	def _hook_values(self, key: str) -> list[str]:
 		"""The functions registered under a hook key; other values (paths, HTML, URLs) are data."""
 		return sorted({f for f in (self._callable(v) for _, _, v in self._hooks.get(key, ())) if f})
-
-	def _callable(self, dotted: str) -> str:
-		if self._symbols.get(dotted) in ("function", "method"):
-			return dotted
-		symbol = self.resolver.symbol(dotted)  # re-exports
-		if symbol and symbol["kind"] in ("function", "method"):
-			return symbol["qualname"]
-		return ""
-
-	def _method_of(self, cls_qualname: str, name: str) -> str | None:
-		"""`name` on the class or a base class, or the function a monkey patch installs there."""
-		key = (cls_qualname, name)
-		if key not in self._methods:
-			cls = self._class(cls_qualname)
-			method = self.resolver.find_method(cls, name)[0] if cls else None
-			found = method["qualname"] if method and method["kind"] == "method" else None
-			if found is None and cls:
-				found = self._patched(cls, name, 0)
-			self._methods[key] = found
-		return self._methods[key]
-
-	def _patched(self, cls: dict, name: str, depth: int) -> str | None:
-		for replacement in self._patches.get(f"{cls['qualname']}.{name}", ()):
-			target = self._callable(replacement)
-			if target:
-				return target
-		if depth > 8:
-			return None
-		for base in _bases(cls["signature"]):
-			base_cls = self.resolver._base_class(cls["module"], base)
-			if base_cls:
-				found = self._patched(base_cls, name, depth + 1)
-				if found:
-					return found
-		return None
-
-	def _class(self, qualname: str) -> dict | None:
-		if qualname not in self._classes:
-			symbol = self.resolver.symbol(qualname)
-			self._classes[qualname] = symbol if symbol and symbol["kind"] == "class" else None
-		return self._classes[qualname]
 
 	def _controller(self, doctype: str) -> dict | None:
 		if doctype not in self._controllers:

@@ -27,7 +27,7 @@ class ImportMap:
 			if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
 				imports.names.setdefault(node.name, f"{module}.{node.name}")
 			elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-				# `qb: LocalProxy["MariaDB"] = local("qb")`: a typed module attribute (see _aliases)
+				# `qb: LocalProxy["MariaDB"] = local("qb")`: a typed module attribute (see aliases.module_aliases)
 				imports.names.setdefault(node.target.id, f"{module}.{node.target.id}")
 		return imports
 

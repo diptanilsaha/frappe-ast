@@ -142,3 +142,28 @@ def configure():
 
 def run_handlers():
 	return frappe.get_hooks("demo_handlers")
+
+
+class Parser:
+	def __init__(self, content):
+		self.parse(content)
+
+	def parse(self, content):
+		pass
+
+	def save(self):
+		pass
+
+
+class ChildParser(Parser):
+	def __init__(self, content, extra):
+		self.extra = extra
+		super().__init__(content)
+
+	def save(self):
+		super(ChildParser, self).save()
+
+
+class GrandParser(ChildParser):
+	def parse(self, content):
+		super().parse(content)
