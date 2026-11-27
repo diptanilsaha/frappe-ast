@@ -31,6 +31,10 @@ class Context:
 				self.refresh()
 		return self._store
 
+	def close(self):
+		if self._store is not None:
+			self._store.close()
+
 	def refresh(self, apps: list[str] | None = None) -> dict:
 		first = self._store.get_meta("indexed_at") is None
 		if first:

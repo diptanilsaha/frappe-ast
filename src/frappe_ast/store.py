@@ -184,6 +184,9 @@ class Store:
 	def commit(self):
 		self.db.commit()
 
+	def close(self):
+		self.db.close()
+
 	def _delete_doctypes(self, where: str, params: list):
 		for table in DOCTYPE_TABLES:
 			self.db.execute(
