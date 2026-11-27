@@ -1,5 +1,7 @@
 """Call-graph edges: one case per edge kind, the shapes that must get none, and paths across kinds."""
 
+import json
+
 import pytest
 
 from frappe_ast.queries import callgraph
@@ -116,3 +118,11 @@ def test_paths_counts_the_routes_past_the_limit(graph):
 def test_paths_none_when_unreachable(graph):
 	found = ShortestPaths(graph).find("demo.dispatch.Hub.end", "demo.dispatch.fan_out")
 	assert found == {"routes": [], "more": 0}
+
+
+def test_paths_json_has_routes_and_says_how_many_more(cli):
+	args = ("paths", "demo.dispatch.fan_out", "demo.dispatch.Hub.end", "--json")
+	every, first = json.loads(cli(*args)), json.loads(cli(*args, "--limit", "1"))
+	assert len(every["routes"]) == 2 and "more" not in every
+	assert len(first["routes"]) == 1 and first["more"] == "1 more routes of the same length"
+	assert first["routes"][0]["steps"][-1].endswith("-[call]-> demo.dispatch.Hub.end")

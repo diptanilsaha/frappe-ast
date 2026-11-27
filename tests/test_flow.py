@@ -1,5 +1,7 @@
 """The flow query: filters over the argument-flow facts, and following them across calls."""
 
+import json
+
 import pytest
 from support import tagged_lines
 
@@ -131,14 +133,48 @@ def test_filling_a_container_carries_what_went_in(flows, lines):
 
 
 @pytest.mark.parametrize(
-	"function, tag, source",
+	"function, tag, source, outer",
 	[
-		("demo.argflow.report", "criterion", "param:start"),  # a comparison builds the criterion
-		("demo.argflow.show", "made", "param:title"),  # row.title = title, then return row
-		("demo.argflow.match", "constructed", "param:doctype"),  # Query(doctype) returns the instance
-		("demo.argflow.show_groups", "grouped", "param:rows"),  # grouped[k].append(row)
+		(
+			"demo.argflow.report",
+			"criterion",
+			"param:start",
+			"frappe.db.sql",
+		),  # a comparison builds the criterion
+		("demo.argflow.show", "made", "param:title", "frappe.msgprint"),  # row.title = title, then return row
+		(
+			"demo.argflow.match",
+			"constructed",
+			"param:doctype",
+			"frappe.db.sql",
+		),  # Query(doctype) is the instance
+		("demo.argflow.show_groups", "grouped", "param:rows", "frappe.msgprint"),  # grouped[k].append(row)
+		("demo.argflow.show_countdown", "yielded", "param:n", "frappe.msgprint"),  # a generator yields -n
 	],
 )
-def test_a_returned_value_keeps_what_was_put_in_it(flows, lines, function, tag, source):
-	at = {(r["path"], r["source"]) for r in flows.rows(function)}
-	assert (f"{ARGFLOW}:{lines[tag]}", source) in at
+def test_a_returned_value_keeps_what_was_put_in_it(flows, lines, function, tag, source, outer):
+	# The outer call takes the inner call's return value; the inner call's own row is on the same line.
+	at = {(r["path"], r["source"], r["callee"]) for r in flows.rows(function)}
+	assert (f"{ARGFLOW}:{lines[tag]}", source, outer) in at
+
+
+def test_filling_a_container_on_self_is_a_store(flows, lines):
+	# self.rows[key] = value stores value on self.rows, which show() reads.
+	rows = flows.follow("demo.argflow.Cache.fill")
+	assert (f"{ARGFLOW}:{lines['cached']}", "param:value") in {(r["path"], r["source"]) for r in rows}
+
+
+def test_follow_text_prints_each_chain_once(cli):
+	out = cli("flow", "demo.argflow.outer", "--follow").splitlines()
+	chains = [line for line in out if line.startswith("- through=")]
+	assert len(chains) == len(set(chains)) == 3
+	inner = out.index(next(c for c in chains if c.endswith("demo.argflow.inner (docname)")))
+	assert out[inner + 1] == "  rows (2):"
+	# the caller is named without the module its path already shows
+	assert out[inner + 2].split()[1:3] == ["inner", "param:name"]
+
+
+def test_follow_json_keeps_the_chain_on_every_row(cli):
+	rows = json.loads(cli("flow", "demo.argflow.outer", "--follow", "--json"))
+	assert all("through" in r for r in rows)
+	assert {r["caller"] for r in rows if r["through"]} >= {"demo.argflow.inner", "demo.argflow.remove"}

@@ -121,3 +121,19 @@ def group(rows):
 
 def show_groups(rows):
 	frappe.msgprint(group(rows))  # @grouped
+
+
+class Cache:
+	def fill(self, key, value):
+		self.rows[key] = value
+
+	def show(self):
+		frappe.msgprint(self.rows)  # @cached
+
+
+def countdown(n):
+	yield -n
+
+
+def show_countdown(n):
+	frappe.msgprint(countdown(n))  # @yielded

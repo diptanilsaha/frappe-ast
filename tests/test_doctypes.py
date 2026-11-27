@@ -66,3 +66,9 @@ def test_refs_fold_uses_in_one_function(store, bench_root):
 	assert row["line"] == lines["total_first"]
 	assert row["lines"] == [lines["total_first"], lines["total_again"]]
 	assert row["col"] > 0
+
+
+def test_refs_text_prints_every_line_of_a_folded_row(cli, bench_root):
+	lines = tagged_lines(bench_root / "apps/demo/demo/dispatch.py")
+	out = cli("refs", "total", "--kind", "attribute")
+	assert f"apps/demo/demo/dispatch.py:{lines['total_first']},{lines['total_again']}  " in out
