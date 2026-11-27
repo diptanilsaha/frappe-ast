@@ -1,6 +1,6 @@
 [project]
 name = "frappe-ast"
-version = "0.2.7"
+version = "0.3.0"
 description = "Static index of a Frappe bench that shows how its code connects: who calls a method, what runs when a document saves or a form field changes, where request input goes, broken hooks and fields, and what a diff touches. It reads Python, JS, Vue, hooks.py and DocType JSON, and never runs app code."
 readme = "README.md"
 requires-python = ">=3.11"
