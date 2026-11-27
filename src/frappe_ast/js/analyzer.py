@@ -6,6 +6,7 @@ import tree_sitter_javascript
 import tree_sitter_typescript
 from tree_sitter import Language, Node, Parser
 
+from frappe_ast.columns import Columns
 from frappe_ast.js import constants
 from frappe_ast.js import frappe_patterns as fp
 from frappe_ast.js import nodes as n
@@ -40,7 +41,7 @@ class JsAnalyzer:
 		if tree.root_node.has_error and not facts.error:
 			facts.error = "partial parse (syntax errors)"
 		consts = constants.collect(tree.root_node)
-		walker = _Walker(facts, self.known_apps, line_offset, consts, tree.root_node)
+		walker = _Walker(facts, self.known_apps, line_offset, consts, tree.root_node, Columns(source))
 		for name, (method, node) in consts.items():
 			walker._symbol(node, name.split(".")[-1], "const", [], qualname=name, signature=f' = "{method}"')
 		walker.walk(tree.root_node, [])
@@ -49,8 +50,17 @@ class JsAnalyzer:
 
 
 class _Walker(TypeSymbols):
-	def __init__(self, facts: FileFacts, known_apps: set[str], line_offset: int, consts: dict, root: Node):
+	def __init__(
+		self,
+		facts: FileFacts,
+		known_apps: set[str],
+		line_offset: int,
+		consts: dict,
+		root: Node,
+		columns: Columns,
+	):
 		self.facts = facts
+		self.columns = columns
 		self.known_apps = known_apps
 		self.offset = line_offset
 		self.consts = consts
@@ -165,7 +175,9 @@ class _Walker(TypeSymbols):
 		)
 		if not callee:
 			return None
-		self.facts.calls.append(Call(self._scope_name(scope), callee, "", self._line(node)))
+		self.facts.calls.append(
+			Call(self._scope_name(scope), callee, "", self._line(node), col=self._col(node))
+		)
 		args = n.arguments(node)
 		self.values.on_call(callee, args, scope)
 		if callee in fp.FORM_EVENT_CALLS:
@@ -272,10 +284,15 @@ class _Walker(TypeSymbols):
 
 	def _ref(self, kind, target, via, node, scope, access):
 		if target:
-			self.facts.refs.append(Ref(kind, target, via, self._line(node), self._scope_name(scope), access))
+			line, scope_name = self._line(node), self._scope_name(scope)
+			self.facts.refs.append(Ref(kind, target, via, line, scope_name, access, self._col(node)))
 
 	def _scope_name(self, scope: list[str]) -> str:
 		return ".".join(scope) if scope else "<module>"
 
 	def _line(self, node: Node) -> int:
 		return node.start_point[0] + 1 + self.offset
+
+	def _col(self, node: Node) -> int:
+		row, byte_offset = node.start_point
+		return self.columns.col(row + 1, byte_offset)

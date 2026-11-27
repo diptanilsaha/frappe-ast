@@ -71,14 +71,19 @@ hide a route; a guessed edge would invent one.
 
 ```
 $ frappe-ast paths erpnext.selling.doctype.sales_order.sales_order.update_status erpnext.selling.doctype.sales_order.sales_order.SalesOrder.update_reserved_qty
-- route=1
-  steps (2):
-    apps/erpnext/.../sales_order.py:2040  ...sales_order.update_status -[doc_method]-> ...sales_order.SalesOrder.update_status
-    apps/erpnext/.../sales_order.py:642  ...sales_order.SalesOrder.update_status -[call]-> ...sales_order.SalesOrder.update_reserved_qty
+routes (1):
+  - route=1
+    steps (2):
+      apps/erpnext/.../sales_order.py:2226  ...sales_order.update_status -[doc_method]-> ...sales_order.SalesOrder.update_status
+      apps/erpnext/.../sales_order.py:688  ...sales_order.SalesOrder.update_status -[call]-> ...sales_order.SalesOrder.update_reserved_qty
 ```
 
-The shortest routes first, up to `--limit` of them, each step with its edge kind. `--depth`
-caps the number of calls (12 by default).
+Every shortest route, up to `--limit` of them (20 at most), each step with its edge kind. Routes
+that have the same length are all listed, in call-site order from the source. When `--limit`
+cuts some off, `more` gives their count: a route the output does not show is still a route. A
+route is a chain of functions: two calls from one function to the same callee are one step, at
+the first call site. Longer routes are not listed. `--depth` caps the number of calls (12 by
+default). With `--json`, the output is `{"routes": [...]}`, plus `"more"` when routes were cut.
 
 ## `surface`: entry points
 

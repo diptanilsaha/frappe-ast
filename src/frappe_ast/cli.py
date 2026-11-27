@@ -27,6 +27,8 @@ def main(argv: list[str] | None = None) -> int:
 		return 2
 	except BrokenPipeError:
 		return 0
+	finally:
+		ctx.close()
 
 
 def _build_parser() -> argparse.ArgumentParser:

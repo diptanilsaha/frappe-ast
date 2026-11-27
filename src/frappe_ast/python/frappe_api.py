@@ -98,15 +98,25 @@ def doctype_arg(node: ast.Call, api: str) -> str:
 	if isinstance(first, ast.Constant) and isinstance(first.value, str):
 		return first.value
 	if isinstance(first, ast.Dict) and api in ("frappe.get_doc", "frappe.new_doc"):
-		return _dict_doctype(first)
+		return dict_doctype(first)
 	return ""
 
 
-def _dict_doctype(node: ast.Dict) -> str:
+def dict_doctype(node: ast.Dict) -> str:
 	for key, value in zip(node.keys, node.values):
 		if isinstance(key, ast.Constant) and key.value == "doctype" and isinstance(value, ast.Constant):
 			return str(value.value)
 	return ""
+
+
+# Calls that set a document's fields by name: each string key of the dict, or the name, is a
+# write to that field. Methods on the document (`super().__init__(d)` in a virtual DocType's
+# load_from_db, `self.update(d)`, `doc.db_set("status", s)`), and APIs whose dict names its
+# DocType under "doctype" (`frappe.get_doc({"doctype": "ToDo", ...})`).
+FIELD_DICT_METHODS = {"__init__", "update", "db_set"}
+FIELD_NAME_METHODS = {"db_set", "set"}
+FIELD_DICT_APIS = {"frappe.get_doc"}
+DICT_BUILDERS = {"dict", "frappe._dict"}  # dict({...}) holds the keys of its literal
 
 
 # Server -> browser events; the JS side listens with frappe.realtime.on(event).

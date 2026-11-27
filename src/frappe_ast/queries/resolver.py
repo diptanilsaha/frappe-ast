@@ -11,9 +11,18 @@ SYMBOL_COLS = """s.name, s.qualname, s.kind, s.line, s.end_line, s.signature, s.
 class Resolver:
 	def __init__(self, store: Store):
 		self.store = store
+		# The index does not change during a query, and the call graph asks for the same paths
+		# (and the same misses) hundreds of thousands of times.
+		self._symbols: dict[tuple[str, bool], dict | None] = {}
 
 	def symbol(self, dotted: str, follow_alias: bool = True) -> dict | None:
 		"""Python symbol for a dotted path. Follows re-exports (`alias` rows)."""
+		key = (dotted, follow_alias)
+		if key not in self._symbols:
+			self._symbols[key] = self._lookup(dotted, follow_alias)
+		return self._symbols[key]
+
+	def _lookup(self, dotted: str, follow_alias: bool) -> dict | None:
 		for _ in range(6):
 			rows = self.store.rows(
 				f"select {SYMBOL_COLS} from symbols s join files f on f.id = s.file_id "

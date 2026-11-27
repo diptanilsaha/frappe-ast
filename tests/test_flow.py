@@ -1,5 +1,7 @@
 """The flow query: filters over the argument-flow facts, and following them across calls."""
 
+import json
+
 import pytest
 from support import tagged_lines
 
@@ -83,3 +85,96 @@ def test_follow_keeps_the_flows_of_the_function_itself(flows):
 def test_follow_stops_at_depth(flows):
 	assert flows.follow("demo.argflow.outer", to="frappe.db.delete", depth=1) == []
 	assert flows.follow("demo.argflow.outer", to="frappe.db.delete", depth=2)
+
+
+def test_each_flow_joins_one_call(store):
+	# A flow names its call by position, so two calls on one line never share a receiver.
+	(row,) = store.rows(
+		"select count(*) n from (select w.rowid from flows w join calls c on c.file_id = w.file_id "
+		"and c.caller = w.caller and c.line = w.line and c.col = w.col and c.callee = w.callee "
+		"group by w.rowid having count(*) > 1)"
+	)
+	assert row["n"] == 0
+
+
+def test_follow_drops_a_value_the_callee_does_not_return(flows, lines):
+	# Finder.find returns self.rows: the rows read from it carry neither key nor limit (#13). echo
+	# returns its parameter, and str is outside the bench, so both keep what they are given.
+	at = {(r["path"].rsplit(":", 1)[1], r["source"]) for r in flows.follow("demo.argflow.search")}
+	assert (str(lines["find"]), "param:limit") in at
+	assert not {(str(lines["row"]), "param:key"), (str(lines["row"]), "param:limit")} & at
+	assert (str(lines["echo"]), "param:key") in at
+	assert (str(lines["builtin"]), "param:limit") in at
+
+
+def test_follow_crosses_a_store_on_self(flows, lines):
+	# find stores limit on self, and query reads it: the read is part of limit's flow (#12).
+	rows = [
+		r
+		for r in flows.follow("demo.argflow.search", source="param:limit")
+		if r["path"] == f"{ARGFLOW}:{lines['stored_read']}"
+	]
+	(row,) = rows
+	assert row["callee"] == "frappe.get_all" and row["arg"] == "limit"
+	assert [step.split("  ", 1)[1] for step in row["through"]] == [
+		"demo.argflow.Finder.find (limit)",
+		"demo.argflow.Finder.query (self.limit)",
+	]
+
+
+def test_store_on_self_is_a_row(flows, lines):
+	rows = flows.rows("demo.argflow.Finder.find")
+	assert ("find", "param:limit", "demo.argflow.Finder.limit", "=") in facts(rows)
+
+
+def test_filling_a_container_carries_what_went_in(flows, lines):
+	(row,) = flows.rows("demo.argflow.fill", to="frappe.get_all")
+	assert (row["source"], row["arg"], row["via"]) == ("param:name", "filters", "container")
+
+
+@pytest.mark.parametrize(
+	"function, tag, source, outer",
+	[
+		(
+			"demo.argflow.report",
+			"criterion",
+			"param:start",
+			"frappe.db.sql",
+		),  # a comparison builds the criterion
+		("demo.argflow.show", "made", "param:title", "frappe.msgprint"),  # row.title = title, then return row
+		(
+			"demo.argflow.match",
+			"constructed",
+			"param:doctype",
+			"frappe.db.sql",
+		),  # Query(doctype) is the instance
+		("demo.argflow.show_groups", "grouped", "param:rows", "frappe.msgprint"),  # grouped[k].append(row)
+		("demo.argflow.show_countdown", "yielded", "param:n", "frappe.msgprint"),  # a generator yields -n
+	],
+)
+def test_a_returned_value_keeps_what_was_put_in_it(flows, lines, function, tag, source, outer):
+	# The outer call takes the inner call's return value; the inner call's own row is on the same line.
+	at = {(r["path"], r["source"], r["callee"]) for r in flows.rows(function)}
+	assert (f"{ARGFLOW}:{lines[tag]}", source, outer) in at
+
+
+def test_filling_a_container_on_self_is_a_store(flows, lines):
+	# self.rows[key] = value stores value on self.rows, which show() reads.
+	rows = flows.follow("demo.argflow.Cache.fill")
+	assert (f"{ARGFLOW}:{lines['cached']}", "param:value") in {(r["path"], r["source"]) for r in rows}
+
+
+def test_follow_text_prints_each_chain_once(cli):
+	out = cli("flow", "demo.argflow.outer", "--follow").splitlines()
+	chains = [line for line in out if line.startswith("- through=")]
+	assert len(chains) == len(set(chains)) == 3
+	inner = out.index(next(c for c in chains if c.endswith("demo.argflow.inner (docname)")))
+	assert out[inner + 1] == "  rows (2):"
+	# the caller is named without the module its path already shows
+	assert out[inner + 2].split()[1:3] == ["inner", "param:name"]
+
+
+def test_follow_json_keeps_the_chain_on_every_row(cli):
+	rows = json.loads(cli("flow", "demo.argflow.outer", "--follow", "--json"))
+	assert all("through" in r for r in rows)
+	assert {r["caller"] for r in rows if r["through"]} >= {"demo.argflow.inner", "demo.argflow.remove"}

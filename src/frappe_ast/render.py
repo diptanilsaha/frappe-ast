@@ -65,13 +65,14 @@ class Renderer:
 			return str(item)
 		if "qualname" in item and "kind" in item:
 			return symbol_line(item)
-		head = f"{item['path']}:{item['line']}" if "path" in item and "line" in item else item.get("path", "")
+		lines = ",".join(map(str, item.get("lines") or [item.get("line")]))
+		head = f"{item['path']}:{lines}" if "path" in item and "line" in item else item.get("path", "")
 		if "scope" in item and "path" in item:
 			item = {**item, "scope": short_scope(item["path"], item["scope"])}
 		rest = [
 			f"{k}={_fmt(v)}" if keyed and k != "symbol" else _fmt(v)
 			for k, v in item.items()
-			if k not in ("path", "line") and v not in (None, "", [], {})
+			if k not in ("path", "line", "lines", "col") and v not in (None, "", [], {})
 		]
 		return "  ".join(p for p in [head, *rest] if p)
 
@@ -103,7 +104,10 @@ def short_scope(path: str, scope: str) -> str:
 
 
 def _is_nested(item) -> bool:
-	return isinstance(item, dict) and any(isinstance(v, dict | list) and v for v in item.values())
+	"""A row with nested parts; `lines`, every line of a folded row, prints in its head."""
+	return isinstance(item, dict) and any(
+		isinstance(v, dict | list) and v for k, v in item.items() if k != "lines"
+	)
 
 
 def _is_flat(value: dict) -> bool:

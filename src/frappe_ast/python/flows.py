@@ -5,19 +5,24 @@ A pass over the function's statements in order, keeping what each local name hol
 then records that source on argument 1. A value read through an attribute, a subscript or `.get()`
 stays direct; anything else between the source and the argument is its `via`, outermost first:
 `f-string,frappe.utils.cint` for `f"... {cint(x)}"`. A step is a resolved call, `.<method>` on a
-value, `f-string`, `format` (`%`, `+`) or `container` (a list, dict or comprehension). Assignments inside a branch or a loop
-add to what a name held before, since either path may run; loop bodies run twice so a value
-assigned late in the body reaches calls early in it. Nested functions get their own pass.
+value, `f-string`, `format` (`%`, `+`) or `container` (a list, dict or comprehension). Assignments
+inside a branch or a loop add to what a name held before, since either path may run; loop bodies
+run twice so a value assigned late in the body reaches calls early in it. Nested functions get
+their own pass.
+
+Three more kinds of row let queries join functions: `<return>` (a value the function returns or
+yields), `self.<x>` with arg `=` (a value a method stores on the instance), and the source
+`self.<x>` (reading an attribute that some method of the class stores a source on). Filling a
+container in place (`x.append(v)`, `x[k] = v`) makes `x` hold what went in.
 """
 
 import ast
 from collections.abc import Callable
 
 from frappe_ast.model import Flow
-from frappe_ast.python.astutil import dotted
+from frappe_ast.python.astutil import callee_text, dotted
+from frappe_ast.python.flow_steps import Sources, call_step, keyed, split_via, through, union
 from frappe_ast.python.frappe_api import REQUEST_SOURCE_CALLS, REQUEST_SOURCES
-
-Sources = dict[str, str]  # source -> via ("" when direct)
 
 # Builtins that inspect a value without passing it on: a flow into them says nothing.
 _INSPECT = {"isinstance", "issubclass", "len", "hasattr", "type", "callable", "id", "bool", "print"}
@@ -25,11 +30,25 @@ _INSPECT = {"isinstance", "issubclass", "len", "hasattr", "type", "callable", "i
 # Reading a part of a value: `x.get("k")` is `x["k"]`.
 _GETTERS = {"get", "getlist", "pop"}
 
+# Methods that put their arguments into the value they are called on.
+_FILLERS = {"append", "extend", "insert", "add", "update", "setdefault"}
+
+RETURN = "<return>"
+
 
 class FunctionFlows:
-	def __init__(self, node: ast.FunctionDef, qualname: str, resolve: Callable[[str], str], method: bool):
+	def __init__(
+		self,
+		node: ast.FunctionDef,
+		qualname: str,
+		resolve: Callable[[str], str],
+		method: bool,
+		position: Callable[[ast.AST], tuple[int, int]],
+	):
 		self.qualname = qualname
 		self.resolve = resolve
+		self.position = position  # (line, column) of a fact, as the analyzer records it
+		self.method = method
 		args = node.args
 		names = [a.arg for a in [*args.posonlyargs, *args.args, *args.kwonlyargs]]
 		if method and names and not _is_static(node):
@@ -94,7 +113,11 @@ class FunctionFlows:
 			self._calls(stmt.subject)
 			for case in stmt.cases:
 				self._block(case.body, False)
-		else:  # Expr, Return, Raise, Assert, Delete, ...
+		elif isinstance(stmt, ast.Return):
+			if stmt.value is not None:
+				self._calls(stmt.value)
+				self._record(stmt, RETURN, "", "", self.sources(stmt.value))
+		else:  # Expr, Raise, Assert, Delete, ...
 			for child in ast.iter_child_nodes(stmt):
 				if isinstance(child, ast.expr):
 					self._calls(child)
@@ -109,6 +132,26 @@ class FunctionFlows:
 		elif isinstance(target, ast.Tuple | ast.List):
 			for element in target.elts:
 				self._assign(element.value if isinstance(element, ast.Starred) else element, value, strong)
+		elif _on_self(target):
+			if self.method and value:
+				cls = self.qualname.rsplit(".", 1)[0]
+				self._record(target, f"self.{target.attr}", f"{cls}.{target.attr}", "=", value)
+		elif isinstance(target, ast.Subscript | ast.Attribute):
+			self._fill(target.value, value)  # x[k] = v, x.k = v
+
+	def _fill(self, container: ast.expr, value: Sources):
+		"""A value put into a container: the local name it hangs off (`x` for `x[k].append(v)`)
+		holds it, or, for `self.a[k] = v`, it is a store on `self.a`."""
+		node = container
+		while isinstance(node, ast.Subscript | ast.Attribute) and not _on_self(node):
+			node = node.value
+		if not value:
+			return
+		if _on_self(node) and self.method:
+			cls = self.qualname.rsplit(".", 1)[0]
+			self._record(node, f"self.{node.attr}", f"{cls}.{node.attr}", "=", through(value, "container"))
+		elif isinstance(node, ast.Name) and node.id != "self":
+			self.env[node.id] = union(self.env.get(node.id, {}), through(value, "container"))
 
 	# ---- calls -----------------------------------------------------------------------------
 
@@ -121,20 +164,29 @@ class FunctionFlows:
 				continue
 			if isinstance(node, ast.Call):
 				self._call(node)
+			elif isinstance(node, ast.Yield | ast.YieldFrom) and node.value is not None:
+				self._record(node, RETURN, "", "", self.sources(node.value))
 			stack.extend(ast.iter_child_nodes(node))
 
 	def _call(self, node: ast.Call):
-		callee = _callee(node)
+		func = node.func
+		if isinstance(func, ast.Attribute) and func.attr in _FILLERS:  # `x[k].append(v)` has no callee
+			for _, value in _arguments(node):
+				self._fill(func.value, self.sources(value))
+		callee = callee_text(node)
 		if not callee or callee in _INSPECT:
 			return
 		resolved = "" if "()" in callee else self.resolve(callee)
-		args = [("*" if isinstance(a, ast.Starred) else str(i), a) for i, a in enumerate(node.args)]
-		args += [(kw.arg or "**", kw.value) for kw in node.keywords]
-		for name, value in args:
-			for source, via in self.sources(value).items():
-				key = (node.lineno, callee, name, source)
-				if key not in self.found or (via == "" and self.found[key].via):
-					self.found[key] = Flow(self.qualname, callee, resolved, node.lineno, name, source, via)
+		for name, value in _arguments(node):
+			self._record(node, callee, resolved, name, self.sources(value))
+
+	def _record(self, node: ast.AST, callee: str, resolved: str, arg: str, found: Sources):
+		for source, chain in found.items():
+			via, returns = split_via(chain)
+			line, col = self.position(node)
+			key = (line, col, callee, arg, source)
+			if key not in self.found or (via == "" and self.found[key].via):
+				self.found[key] = Flow(self.qualname, callee, resolved, line, arg, source, via, col, returns)
 
 	# ---- expressions -----------------------------------------------------------------------
 
@@ -146,48 +198,60 @@ class FunctionFlows:
 			request = self._request(node.id)
 			return {request: ""} if request else dict(self.env.get(node.id, {}))
 		if isinstance(node, ast.Attribute):
+			if _on_self(node) and self.method:  # a candidate: see keep_stored
+				return {f"self.{node.attr}": ""}
 			request = self._request(dotted(node))
 			return {request: ""} if request else self.sources(node.value)
 		if isinstance(node, ast.Subscript):
-			return _keyed(self.sources(node.value), node.slice)
+			return keyed(self.sources(node.value), node.slice)
 		if isinstance(node, ast.Call):
 			return self._call_sources(node)
 		if isinstance(node, ast.Starred | ast.Await | ast.NamedExpr | ast.FormattedValue):
 			return self.sources(node.value)
 		if isinstance(node, ast.IfExp):
-			return _union(self.sources(node.body), self.sources(node.orelse))
+			return union(self.sources(node.body), self.sources(node.orelse))
 		if isinstance(node, ast.BoolOp):
-			return _union(*map(self.sources, node.values))
+			return union(*map(self.sources, node.values))
 		if isinstance(node, ast.JoinedStr):
-			return _through(_union(*map(self.sources, node.values)), "f-string")
+			return through(union(*map(self.sources, node.values)), "f-string")
 		if isinstance(node, ast.BinOp):
-			return _through(_union(self.sources(node.left), self.sources(node.right)), "format")
+			return through(union(self.sources(node.left), self.sources(node.right)), "format")
+		if isinstance(node, ast.UnaryOp):
+			return self.sources(node.operand)
+		if isinstance(node, ast.Compare):  # `field >= x` builds a query criterion that holds x
+			return through(union(*map(self.sources, [node.left, *node.comparators])), "compare")
 		if isinstance(node, ast.List | ast.Tuple | ast.Set):
-			return _through(_union(*map(self.sources, node.elts)), "container")
+			return through(union(*map(self.sources, node.elts)), "container")
 		if isinstance(node, ast.Dict):
-			return _through(_union(*map(self.sources, node.values)), "container")
+			return through(union(*map(self.sources, node.values)), "container")
 		if isinstance(node, ast.ListComp | ast.SetComp | ast.GeneratorExp | ast.DictComp):
-			return _through(_union(*(self.sources(g.iter) for g in node.generators)), "container")
+			return through(union(*(self.sources(g.iter) for g in node.generators)), "container")
 		return {}
 
 	def _call_sources(self, node: ast.Call) -> Sources:
-		callee = _callee(node)
+		callee = callee_text(node)
 		resolved = self.resolve(callee) if callee and "()" not in callee else ""
 		if isinstance(node.func, ast.Name):
 			resolved = resolved or callee  # a builtin: int(), str()
 		if resolved in REQUEST_SOURCE_CALLS:
 			label = REQUEST_SOURCE_CALLS[resolved]
-			return _keyed({label: ""}, node.args[0]) if node.args else {label: ""}
+			return keyed({label: ""}, node.args[0]) if node.args else {label: ""}
 		func = node.func
 		if isinstance(func, ast.Attribute) and func.attr in _GETTERS:
 			receiver = self.sources(func.value)
 			if receiver:
-				return _keyed(receiver, node.args[0]) if node.args else receiver
-		found = _union(*(self.sources(a) for a in node.args), *(self.sources(k.value) for k in node.keywords))
+				return keyed(receiver, node.args[0]) if node.args else receiver
+		step = resolved or "call"
+		found = union(
+			*(
+				through(self.sources(value), call_step(step, *self.position(node), callee, name))
+				for name, value in _arguments(node)
+			)
+		)
 		receiver = self.sources(func.value) if isinstance(func, ast.Attribute) else {}
 		if receiver:  # name.strip(), doc.as_dict(): a method on the value itself
-			return _union(_through(found, resolved or "call"), _through(receiver, f".{func.attr}"))
-		return _through(found, resolved or "call")
+			return union(found, through(receiver, f".{func.attr}"))
+		return found
 
 	def _request(self, text: str) -> str:
 		absolute = self.resolve(text) or text
@@ -200,37 +264,33 @@ class FunctionFlows:
 		return ""
 
 
-def _callee(node: ast.Call) -> str:
-	"""The callee as the analyzer writes it: `a.b`, or `a().b` for a method on a call's result."""
-	callee = dotted(node.func)
-	if not callee and isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Call):
-		inner = dotted(node.func.value.func)
-		callee = f"{inner}().{node.func.attr}" if inner else ""
-	return callee
+def keep_stored(flows: list[Flow], cls: str) -> list[Flow]:
+	"""Drop the rows of `cls`'s methods whose source is an attribute no method of the class stores a
+	source on. A store counts when its value comes from a parameter, the request or another stored
+	attribute (`self.b = self.a`), so the stored set grows to a fixed point first."""
+	mine = [f.caller.rsplit(".", 1)[0] == cls for f in flows]
+	stores = [f for f, own in zip(flows, mine) if own and f.arg == "=" and f.callee.startswith("self.")]
+	stored: set[str] = set()
+	while True:
+		grown = stored | {f.callee for f in stores if not f.source.startswith("self.") or f.source in stored}
+		if grown == stored:
+			break
+		stored = grown
+	return [
+		f
+		for f, own in zip(flows, mine)
+		if not (own and f.source.startswith("self.") and f.source not in stored)
+	]
 
 
-def _keyed(found: Sources, key: ast.expr) -> Sources:
-	"""`form_dict["name"]`: a request source without a key gains it; anything else passes through."""
-	if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
-		return found
-	return {
-		(f"{s}:{key.value}" if not s.startswith("param:") and ":" not in s else s): via
-		for s, via in found.items()
-	}
+def _arguments(node: ast.Call) -> list[tuple[str, ast.expr]]:
+	"""(arg, value) per argument: `0`, `1`, ... by position, the keyword, or `*` / `**`."""
+	args = [("*" if isinstance(a, ast.Starred) else str(i), a) for i, a in enumerate(node.args)]
+	return args + [(kw.arg or "**", kw.value) for kw in node.keywords]
 
 
-def _union(*parts: Sources) -> Sources:
-	out: Sources = {}
-	for part in parts:
-		for source, via in part.items():
-			if source not in out or via == "":
-				out[source] = via
-	return out
-
-
-def _through(found: Sources, via: str) -> Sources:
-	"""The same sources, now behind one more step (a step repeated in a row is kept once)."""
-	return {s: v if v.split(",")[0] == via else (f"{via},{v}" if v else via) for s, v in found.items()}
+def _on_self(node: ast.expr) -> bool:
+	return isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "self"
 
 
 def _is_static(node: ast.FunctionDef) -> bool:

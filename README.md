@@ -1,22 +1,8 @@
 # frappe-ast
 
-A static index of a Frappe bench that answers how its code connects, built for humans and AI agents.
+A static index of a Frappe bench that shows how its code connects: who calls a method, what runs when a document saves, where request input goes, and what a diff touches. It reads the code and never runs it.
 
-Frappe joins code through strings and conventions: desk JS calls a method by its dotted path, `hooks.py` runs code by name, and another app can override or patch a function at run time. Grep finds the text, but not who calls a method or what runs when a document saves. frappe-ast resolves both, without running app code.
-
-Using an agent? Run `harness/install.sh ~/benches/<bench>`. It links `harness/AGENTS.md` into the bench, the guide that tells agents which query answers which question.
-
-```sh
-cd ~/benches/<bench>
-frappe-ast method erpnext.selling.doctype.quotation.quotation.make_sales_order  # every caller, override and hook
-frappe-ast doctype "Sales Invoice"            # controller, doc_events from every app, schema, client code
-frappe-ast form "Sales Order" item_code       # the handlers a field change runs, in desk order
-frappe-ast edges erpnext.controllers.stock_controller.StockController.validate   # what it makes run
-frappe-ast reach erpnext.stock.stock_ledger.make_sl_entries   # every route from an entry point to it
-frappe-ast flow frappe.api.v2.bulk_update_docs --follow   # where each argument goes, across calls
-frappe-ast check apps/erpnext                 # dead hooks, missing methods, unknown fields
-frappe-ast impact --base origin/develop       # what a diff touches, and who depends on it
-```
+Frappe links code by name. Desk JS calls a method by its dotted path, `hooks.py` runs functions from strings, and another app can override a DocType's class. Grep finds the text but not the link. frappe-ast resolves the link, so a person or an agent goes from a bug or an untrusted input straight to the lines that matter.
 
 ## Install
 
@@ -24,46 +10,46 @@ frappe-ast impact --base origin/develop       # what a diff touches, and who dep
 uv tool install "git+https://github.com/diptanilsaha/frappe-ast.git"
 ```
 
-It runs on Python 3.11 and later and reads v15, v16 and develop benches.
+Python 3.11 or later. It reads v15, v16 and develop benches.
 
-## How it works
+## First run
 
-It parses Python with `ast`, JS, TS and Vue with tree-sitter, and `hooks.py` and DocType JSON as data, into a SQLite index at `~/.cache/frappe-ast/`. The first run indexes the bench in seconds; after that each query re-reads only the files that changed. Queries join the facts across files and apps.
+```sh
+cd ~/benches/<bench>
+frappe-ast doctype "Sales Invoice"
+```
+
+The first query indexes the bench into SQLite under `~/.cache/frappe-ast/`, in up to a minute. Each later query re-reads only the files that changed.
+
+**For an agent**, link the bench guide into the bench: `harness/install.sh ~/benches/<bench>`. The agent then reads `harness/AGENTS.md`, which says which query answers which question.
+
+## What it answers
+
+| Question | Example |
+|---|---|
+| Who defines, overrides, hooks or calls a method? | `method erpnext.selling.doctype.quotation.quotation.make_sales_order` |
+| What does a function make run, and how do two functions connect? | `edges <function>` · `paths <from> <to>` |
+| What can make a function run: a request, a document save, a hook, a job? | `reach erpnext.stock.stock_ledger.make_sl_entries` |
+| Where do a function's parameters and the request input go? | `flow frappe.api.v2.bulk_update_docs --follow` |
+| Everything about a DocType, or what a form field change runs | `doctype "Sales Invoice"` · `form "Sales Order" item_code` |
+| Who references a DocType, field or event? | `refs "Item"` |
+| Which hooks, methods or fields are broken? What does a diff touch? | `check apps/erpnext` · `impact --base origin/develop` |
+
+`frappe-ast --help` lists every command, and `frappe-ast <command> --help` lists its options.
 
 ## Output
 
-- One line per fact, `path:line` first, paths relative to the bench root.
-- `--json` for code that filters the output; `--limit N` caps rows per section.
-- `--bench` picks the bench (default: the nearest one above the current directory); `--no-refresh` skips the index refresh.
-
-## Commands
-
-| Command | What it does |
-|---|---|
-| `method <dotted>` | Definition, overrides, patches, hooks, Python callers and client calls (`frappe.call`, `frm.call`, frappe-ui, URLs, Button fields). |
-| `callers` / `callees` | Python calls into or out of a symbol, resolved through imports and re-exports. |
-| `edges <fn>` / `paths <from> <to>` | The call graph: inherited and overriding methods, `super()`, `with` blocks, `@property` getters and setters, constructors, document lifecycle, `doc_events`, hook dispatch, functions passed to `frappe.enqueue`. |
-| `flow <fn> [--follow]` | Where a function's parameters and request input go: each call and argument they reach, unchanged or through what, and on into the functions they are passed to. |
-| `surface` / `reach <fn>` | Functions that requests, pages, documents, hooks and jobs run directly, and the route from each to a function. |
-| `doctype <name>` | Controller and its bases, `doc_events`, overrides, schema, links and the client code that names its fields. |
-| `form <DocType> [field]` | A desk form's scripts from every app, its JS controller chain, and the handlers per event. |
-| `record <name>` | A standard Report, Page, Web Form, Print Format, ... with the code beside its JSON. |
-| `component <name>` | A Vue component in an app or its frappe-ui copy: props, emits, slots, usages. |
-| `refs <target>` | References to a DocType, field, component, form event, realtime event or import. |
-| `find` / `outline` | Symbol definitions by name or glob; the symbols of one file. |
-| `hooks` / `endpoints` / `apps` | Hook entries folded across apps; whitelisted methods; apps, `required_apps` and frontends. |
-| `check [path]` | Frappe-aware rules: dead hook paths, missing methods, unknown fields, broken records, stale patches. |
-| `impact --base <ref>` | Symbols a diff touches, with their callers, hooks and patches. |
-| `sql <query>` | Read-only SQL over the index. |
-| `index` / `status` | Build or refresh the index; where it is and how fresh. |
-
-`frappe-ast <command> --help` lists each command's options.
+- One fact per line, `path:line` first, relative to the bench root.
+- `--json` for scripts (it adds `col`, the column); `--limit N` caps the rows per section.
+- `--bench <path>` picks another bench than the one above the current directory; `--no-refresh` skips the refresh.
 
 ## Docs
 
-- [How it works](docs/how-it-works.md): how the index is built and refreshed, what it holds, and a flow diagram for each command.
-- [Call graph and entry points](docs/call-graph.md): reading `edges`, `paths`, `surface` and `reach`, with sample output and every edge and entry-point kind.
-- [Argument flow](docs/argument-flow.md): reading `flow` and `--follow`, how values are tracked, and the filters.
-- [The index's facts](docs/facts.md): what the values in each table mean, for `sql` queries.
-- [`harness/AGENTS.md`](harness/AGENTS.md): for agents working in a bench, which query answers which question, and what static analysis cannot see.
-- [`AGENTS.md`](AGENTS.md): for agents changing this tool.
+| Read | When you |
+|---|---|
+| [`harness/AGENTS.md`](harness/AGENTS.md) | run an agent in a bench: the query for each question, and what static analysis cannot see |
+| [How it works](docs/how-it-works.md) | want to know how the index is built and refreshed, with a diagram per command |
+| [Call graph and entry points](docs/call-graph.md) | read `edges`, `paths`, `surface` or `reach` output |
+| [Argument flow](docs/argument-flow.md) | read `flow` output |
+| [The index's facts](docs/facts.md) | write `sql` queries over the index |
+| [`AGENTS.md`](AGENTS.md) | change this tool |

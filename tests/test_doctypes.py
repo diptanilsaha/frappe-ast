@@ -1,5 +1,7 @@
 """`doctype`, `record` and `refs`: what a DocType or standard record is made of, and who names it."""
 
+from support import tagged_lines
+
 from frappe_ast.queries.doctype import DoctypeReport
 from frappe_ast.queries.lookup import Lookup
 from frappe_ast.queries.record import RecordReport
@@ -56,3 +58,17 @@ def test_refs(store):
 	assert any(r["path"] == "apps/demo/demo/api.py" for r in lookup.refs("typing", kind="import")["refs"])
 	# frappe.publish_realtime in Python and frappe.realtime.on in JS.
 	assert {r["access"] for r in lookup.refs("task_done", "realtime")["refs"]} == {"publish", "listen"}
+
+
+def test_refs_fold_uses_in_one_function(store, bench_root):
+	lines = tagged_lines(bench_root / "apps/demo/demo/dispatch.py")
+	(row,) = Lookup(store, 20).refs("total", "attribute")["refs"]
+	assert row["line"] == lines["total_first"]
+	assert row["lines"] == [lines["total_first"], lines["total_again"]]
+	assert row["col"] > 0
+
+
+def test_refs_text_prints_every_line_of_a_folded_row(cli, bench_root):
+	lines = tagged_lines(bench_root / "apps/demo/demo/dispatch.py")
+	out = cli("refs", "total", "--kind", "attribute")
+	assert f"apps/demo/demo/dispatch.py:{lines['total_first']},{lines['total_again']}  " in out

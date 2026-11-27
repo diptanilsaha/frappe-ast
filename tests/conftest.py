@@ -14,6 +14,7 @@ import pytest
 from support import Facts
 
 from frappe_ast.analyze import FileAnalyzer
+from frappe_ast.cli import main
 from frappe_ast.indexer import Indexer
 from frappe_ast.queries.method import MethodTrace
 from frappe_ast.store import Store
@@ -64,3 +65,15 @@ def trace(store):
 
 def _git(repo: Path, *args: str):
 	subprocess.run(["git", "-C", str(repo), *args], check=True)
+
+
+@pytest.fixture
+def cli(bench_root, store, capsys):
+	"""cli("flow", "demo.x.fn", "--follow") -> what the command prints, from the indexed fixture bench."""
+
+	def run(*args: str) -> str:
+		capsys.readouterr()
+		assert main([*args, "--bench", str(bench_root), "--db", str(store.path), "--no-refresh"]) in (0, None)
+		return capsys.readouterr().out
+
+	return run

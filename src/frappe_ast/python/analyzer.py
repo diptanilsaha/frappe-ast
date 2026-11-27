@@ -2,12 +2,14 @@
 
 import ast
 
+from frappe_ast.columns import Columns
 from frappe_ast.model import Call, FileFacts, Ref
 from frappe_ast.python import compat, custom_fields
 from frappe_ast.python.aliases import module_aliases
-from frappe_ast.python.astutil import dotted, short_literal
+from frappe_ast.python.astutil import call_position, callee_text, dotted, short_literal
 from frappe_ast.python.checks import PythonChecks
-from frappe_ast.python.flows import FunctionFlows
+from frappe_ast.python.field_writes import FieldWrites
+from frappe_ast.python.flows import FunctionFlows, keep_stored
 from frappe_ast.python.frappe_api import (
 	API_URL_RE,
 	DOC_LOADER_APIS,
@@ -37,24 +39,25 @@ class PythonAnalyzer:
 		imports = ImportMap.from_tree(tree, module, is_package=path.endswith("__init__.py"))
 		# Custom field lists are rare; skip the extra tree walk in files that cannot hold one.
 		lists = custom_fields.FieldLists(tree if "fieldname" in source else ast.Module(body=[]))
-		_ModuleVisitor(facts, imports, self.known_apps, lists).visit(tree)
+		_ModuleVisitor(facts, imports, self.known_apps, lists, Columns(source)).visit(tree)
 		facts.symbols.extend(module_aliases(tree, imports, module))
 		facts.findings = PythonChecks(imports).run(tree)
 		return facts
 
 
 class _ModuleVisitor(ast.NodeVisitor):
-	def __init__(self, facts: FileFacts, imports: ImportMap, known_apps: set[str], lists):
+	def __init__(self, facts: FileFacts, imports: ImportMap, known_apps: set[str], lists, columns: Columns):
 		self.facts = facts
+		self.columns = columns
 		self.lists = lists
 		self.imports = imports
 		self.known_apps = known_apps
 		self.patches = PatchRefs(imports, known_apps)
+		self.fields = FieldWrites(self._resolve_callee)
 		self.scope: list[tuple[str, str]] = []  # (kind, name)
 		self.local_defs: list[set[str]] = [set()]  # functions each enclosing def defines directly
 		# what each name is bound to, per def scope (module first): see Call.receiver
 		self.bindings: list[dict[str, str]] = [{}]
-		self.attributes: set[tuple[str, str, str, str]] = set()  # attribute refs already recorded
 
 	@property
 	def qual_scope(self) -> str:
@@ -66,7 +69,9 @@ class _ModuleVisitor(ast.NodeVisitor):
 		bases = [ast.unparse(b) for b in node.bases]
 		self._add_symbol(node, "class", signature=f"({', '.join(bases)})")
 		self.scope.append(("class", node.name))
+		start = len(self.facts.flows)
 		self.generic_visit(node)
+		self.facts.flows[start:] = keep_stored(self.facts.flows[start:], self.qual_scope)
 		self.scope.pop()
 
 	def visit_FunctionDef(self, node):
@@ -77,8 +82,11 @@ class _ModuleVisitor(ast.NodeVisitor):
 			{c.name for c in node.body if isinstance(c, ast.FunctionDef | ast.AsyncFunctionDef)}
 		)
 		self.bindings.append({})
-		self.facts.flows += FunctionFlows(node, self.qual_scope, self._resolve_callee, in_class).run()
+		self.fields.enter()
+		flows = FunctionFlows(node, self.qual_scope, self._resolve_callee, in_class, self.position)
+		self.facts.flows += flows.run()
 		self.generic_visit(node)
+		self.fields.leave()
 		self.bindings.pop()
 		self.local_defs.pop()
 		self.scope.pop()
@@ -86,7 +94,7 @@ class _ModuleVisitor(ast.NodeVisitor):
 	visit_AsyncFunctionDef = visit_FunctionDef
 
 	def visit_Call(self, node: ast.Call):
-		callee = dotted(node.func)
+		callee = callee_text(node)
 		receiver = ""
 		if isinstance(node.func, ast.Attribute):
 			base = node.func.value
@@ -95,13 +103,16 @@ class _ModuleVisitor(ast.NodeVisitor):
 			elif isinstance(base, ast.Call):
 				# `Engine().run()`, `frappe.get_doc("Item", n).save()`: a method on a call's result
 				receiver = self._value_type(base)
-				inner = dotted(base.func)
-				callee = callee or (f"{inner}().{node.func.attr}" if inner else "")
 		if callee:
 			resolved = "" if "()" in callee else self._resolve_callee(callee)
 			arg = short_literal(node.args[0] if node.args else None)
-			self.facts.calls.append(Call(self.qual_scope, callee, resolved, node.lineno, receiver, arg))
+			line, col = self.position(node)
+			self.facts.calls.append(Call(self.qual_scope, callee, resolved, line, receiver, arg, col))
 			self._record_frappe_refs(node, resolved or callee)
+			for field, at, via in self.fields.writes(
+				node, resolved or callee, receiver, self._class_qualname()
+			):
+				self._ref("attribute", field, via, at, "set")
 			for value in [*node.args, *(kw.value for kw in node.keywords)]:
 				self._callback(value, resolved or callee)
 			self._custom_fields(custom_fields.from_call(node, resolved or callee))
@@ -126,7 +137,8 @@ class _ModuleVisitor(ast.NodeVisitor):
 			for method in (enter, exit):
 				callee = f"{text}.{method}"
 				resolved = "" if "()" in callee else self._resolve_callee(callee)
-				self.facts.calls.append(Call(self.qual_scope, callee, resolved, node.lineno, receiver))
+				line, col = self.position(expr)
+				self.facts.calls.append(Call(self.qual_scope, callee, resolved, line, receiver, col=col))
 		self.generic_visit(node)
 
 	visit_AsyncWith = visit_With
@@ -141,10 +153,7 @@ class _ModuleVisitor(ast.NodeVisitor):
 			via = self._value_type(base)
 		if via and via != "doctype:?" and not isinstance(node.ctx, ast.Del):
 			access = "read" if isinstance(node.ctx, ast.Load) else "write"
-			key = (self.qual_scope, node.attr, via, access)
-			if key not in self.attributes:  # the first use in a function is enough for an edge
-				self.attributes.add(key)
-				self.facts.refs.append(Ref("attribute", node.attr, via, node.lineno, self.qual_scope, access))
+			self._ref("attribute", node.attr, via, node, access)
 		self.generic_visit(node)
 
 	def visit_Assign(self, node: ast.Assign):
@@ -152,6 +161,7 @@ class _ModuleVisitor(ast.NodeVisitor):
 		self.generic_visit(node)
 		value = self._value_type(node.value)
 		for target in node.targets:
+			self.fields.bind(target, node.value)
 			if isinstance(target, ast.Name):
 				self._bind(target.id, value)
 
@@ -218,7 +228,7 @@ class _ModuleVisitor(ast.NodeVisitor):
 				self._import_ref("import_name", f"{base}.{alias.name}" if base else alias.name, base, node)
 
 	def _import_ref(self, kind: str, target: str, via: str, node: ast.stmt):
-		self.facts.refs.append(Ref(kind, target, via, node.lineno, self.qual_scope, "import"))
+		self._ref(kind, target, via, node, "import")
 
 	def visit_Dict(self, node: ast.Dict):
 		self._custom_fields(custom_fields.from_dict(node, self.lists))
@@ -234,7 +244,7 @@ class _ModuleVisitor(ast.NodeVisitor):
 		name = dotted(node)
 		target = self._resolve_callee(name) if name else ""
 		if target and target.split(".")[0] in self.known_apps:
-			self.facts.refs.append(Ref("callback", target, via, node.lineno, self.qual_scope, "pass"))
+			self._ref("callback", target, via, node, "pass")
 
 	def _custom_fields(self, found: list[tuple[str, str, int]]):
 		for doctype, field, line in found:
@@ -247,7 +257,7 @@ class _ModuleVisitor(ast.NodeVisitor):
 		url = API_URL_RE.search(value) if "method/" in value else None
 		method, via = (url.group(1), "url") if url else (value, "string")
 		if DOTTED_RE.match(method) and method.split(".")[0] in self.known_apps:
-			self.facts.refs.append(Ref("dotted", method, via, node.lineno, self.qual_scope, "call"))
+			self._ref("dotted", method, via, node, "call")
 
 	def _add_symbol(self, node, kind: str, signature: str):
 		qualname = f"{self.qual_scope if self.scope else self.facts.module}.{node.name}"
@@ -265,14 +275,19 @@ class _ModuleVisitor(ast.NodeVisitor):
 		if api in DOCTYPE_APIS:
 			doctype = doctype_arg(node, api)
 			if doctype:
-				access = DOCTYPE_APIS[api]
-				self.facts.refs.append(Ref("doctype", doctype, api, node.lineno, self.qual_scope, access))
+				self._ref("doctype", doctype, api, node, DOCTYPE_APIS[api])
 		if api in REALTIME_APIS and realtime_event(node):
-			self.facts.refs.append(
-				Ref("realtime", realtime_event(node), api, node.lineno, self.qual_scope, "publish")
-			)
+			self._ref("realtime", realtime_event(node), api, node, "publish")
 		if api in DOTTED_APIS and node.args and isinstance(node.args[0], ast.Constant):
 			target = node.args[0].value
 			if isinstance(target, str):
-				line = node.args[0].lineno
-				self.facts.refs.append(Ref("method", target, api, line, self.qual_scope, "call"))
+				self._ref("method", target, api, node.args[0], "call")
+
+	def _ref(self, kind: str, target: str, via: str, node: ast.AST, access: str):
+		line, col = self.position(node)
+		self.facts.refs.append(Ref(kind, target, via, line, self.qual_scope, access, col))
+
+	def position(self, node: ast.AST) -> tuple[int, int]:
+		"""(line, 1-based column) of a fact: for a call, of the name it calls."""
+		line, offset = call_position(node) if isinstance(node, ast.Call) else (node.lineno, node.col_offset)
+		return line, self.columns.col(line, offset)
