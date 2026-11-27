@@ -59,6 +59,9 @@ LIFECYCLE_METHODS = {name: name for name in LIFECYCLE_EVENTS}
 
 Edge = tuple[str, str, int, str, int]  # caller, callee, line, kind, file_id
 
+# Callers per query when edges are read for a set of callers: under SQLite's variable limit.
+_BATCH = 500
+
 
 class CallGraph:
 	def __init__(self, store: Store):
@@ -71,6 +74,7 @@ class CallGraph:
 		self._callable = self.classes.callable
 		self._controllers: dict[str, dict | None] = {}
 		self._subclasses: dict[str, list[str]] | None = None  # class -> direct subclasses
+		self._all_subclasses: dict[str, list[str]] = {}  # class -> subclasses at any depth
 		self._bases: dict[tuple[str, str], str] = {}
 		self._paths: dict[int, str] | None = None  # file id -> path
 		self._variables = {
@@ -85,20 +89,38 @@ class CallGraph:
 
 	# ---- edges -----------------------------------------------------------------------------
 
-	def edges(self, apps: list[str] | None = None, caller: str = "") -> list[dict]:
-		"""Every edge out of `caller`, or out of each caller in `apps` (all apps when both are empty)."""
+	def edges(
+		self, apps: list[str] | None = None, caller: str = "", callers: list[str] | None = None
+	) -> list[dict]:
+		"""Every edge out of `caller` or `callers`, or out of each caller in `apps` (all apps when
+		none is given)."""
 		paths = self._file_paths()
 		return [
 			{"caller": c, "callee": callee, "line": line, "kind": kind, "path": paths[file_id]}
-			for c, callee, line, kind, file_id in self.iter_edges(apps, caller)
+			for c, callee, line, kind, file_id in self.iter_edges(apps, caller, callers)
 		]
 
-	def iter_edges(self, apps: list[str] | None = None, caller: str = "") -> Iterator[Edge]:
+	def iter_edges(
+		self, apps: list[str] | None = None, caller: str = "", callers: list[str] | None = None
+	) -> Iterator[Edge]:
 		"""`edges` as (caller, callee, line, kind, file_id) tuples, read row by row: only this compact
 		does the bench-wide graph fit in memory."""
-		where, params = "f.lang = 'python'", [*(apps or ()), *([caller] if caller else ())]
+		names = [caller] if caller else list(callers or ())
+		if caller or callers is not None:
+			for i in range(0, len(names), _BATCH):
+				yield from self._iter_edges(apps, names[i : i + _BATCH])
+		else:
+			yield from self._iter_edges(apps, None)
+
+	def _iter_edges(self, apps: list[str] | None, callers: list[str] | None) -> Iterator[Edge]:
+		where, params = "f.lang = 'python'", [*(apps or ()), *(callers or ())]
 		where += f" and f.app in ({','.join('?' * len(apps))})" if apps else ""
-		calls, refs = (f"{where} and c.caller = ?", f"{where} and r.scope = ?") if caller else (where, where)
+		# A call with neither a resolved target nor a known receiver has no edge (see `targets`).
+		calls, refs, by_kind = f"{where} and (c.resolved != '' or c.receiver != '')", where, "r.kind"
+		if callers is not None:
+			marks = ",".join("?" * len(callers))
+			calls, refs = f"{calls} and c.caller in ({marks})", f"{where} and r.scope in ({marks})"
+			by_kind = "+r.kind"  # `+` keeps SQLite on the scope index: by kind it scans every attribute ref
 		for c in self.store.iter_rows(
 			"select c.caller, c.callee, c.resolved, c.line, c.receiver, c.arg, c.file_id from calls c "
 			f"join files f on f.id = c.file_id where {calls}",
@@ -107,13 +129,18 @@ class CallGraph:
 			source = intern(c["caller"])
 			for target, kind in self.targets(c):
 				yield source, intern(target), c["line"], kind, c["file_id"]
+		used = set()  # (scope, attribute, receiver, access): one property edge per function
 		for r in self.store.iter_rows(
 			"select r.kind, r.target, r.via, r.access, r.line, r.scope, r.file_id from refs r "
 			f"join files f on f.id = r.file_id where {refs} "
-			"and r.kind in ('callback', 'method', 'dotted', 'attribute') and r.scope != '<module>'",
+			f"and {by_kind} in ('callback', 'method', 'dotted', 'attribute') and r.scope != '<module>'",
 			*params,
 		):
 			if r["kind"] == "attribute":
+				use = (r["scope"], r["target"], r["via"], r["access"])
+				if use in used:
+					continue
+				used.add(use)
 				target, kind = self._property(r["via"], r["target"], r["access"]), "property"
 			else:
 				target, kind = self._callable(r["target"]), REF_EDGE_KINDS[r["kind"]]
@@ -192,8 +219,32 @@ class CallGraph:
 					found.append((value, "doc_event"))
 		return found
 
+	def subclasses(self, cls_qualname: str) -> list[str]:
+		"""The subclasses of a class at any depth, nearest first."""
+		if cls_qualname in self._all_subclasses:
+			return self._all_subclasses[cls_qualname]
+		self._subclass_map()
+		found, queue, seen = [], deque(self._subclasses.get(cls_qualname, ())), set()
+		while queue:
+			sub = queue.popleft()
+			if sub not in seen:
+				seen.add(sub)
+				found.append(sub)
+				queue.extend(self._subclasses.get(sub, ()))
+		self._all_subclasses[cls_qualname] = found
+		return found
+
 	def _overrides(self, cls_qualname: str, name: str) -> list[str]:
 		"""`name` as defined by the subclasses of a class, at any depth."""
+		found = []
+		for sub in self.subclasses(cls_qualname):
+			if self._symbols.get(f"{sub}.{name}") == "method":
+				found.append(f"{sub}.{name}")
+				if len(found) > MAX_OVERRIDES:
+					return []
+		return found
+
+	def _subclass_map(self):
 		if self._subclasses is None:
 			self._subclasses = defaultdict(list)
 			for r in self.store.rows(
@@ -207,18 +258,6 @@ class CallGraph:
 						self._bases[key] = found["qualname"] if found else ""
 					if self._bases[key]:
 						self._subclasses[self._bases[key]].append(r["qualname"])
-		found, queue, seen = [], deque(self._subclasses.get(cls_qualname, ())), set()
-		while queue:
-			sub = queue.popleft()
-			if sub in seen:
-				continue
-			seen.add(sub)
-			if self._symbols.get(f"{sub}.{name}") == "method":
-				found.append(f"{sub}.{name}")
-				if len(found) > MAX_OVERRIDES:
-					return []
-			queue.extend(self._subclasses.get(sub, ()))
-		return found
 
 	def _hook_values(self, key: str) -> list[str]:
 		"""The functions registered under a hook key; other values (paths, HTML, URLs) are data."""
@@ -229,34 +268,6 @@ class CallGraph:
 			dt = self.resolver.doctype(doctype)
 			self._controllers[doctype] = self.resolver.controller_class(dt) if dt else None
 		return self._controllers[doctype]
-
-	# ---- paths -----------------------------------------------------------------------------
-
-	def paths(self, source: str, target: str, limit: int = 5, max_depth: int = 12) -> list[list[dict]]:
-		"""Shortest call paths from `source` to `target`, as lists of edges."""
-		start = self._callable(source) or source
-		goal = self._callable(target) or target
-		out_edges: dict[str, list[dict]] = {}  # filled per node as the search reaches it
-		found, queue = [], deque([(start, [])])
-		seen_depth = {start: 0}
-		while queue and len(found) < limit:
-			node, path = queue.popleft()
-			if len(path) >= max_depth:
-				continue
-			if node not in out_edges:
-				out_edges[node] = sorted(self.edges(caller=node), key=lambda x: x["line"])
-			for e in out_edges[node]:
-				nxt = e["callee"]
-				step = [*path, e]
-				if nxt == goal:
-					found.append(step)
-					if len(found) >= limit:
-						break
-					continue
-				if seen_depth.get(nxt, 99) > len(step):
-					seen_depth[nxt] = len(step)
-					queue.append((nxt, step))
-		return found
 
 	def file_path(self, file_id: int) -> str:
 		return self._file_paths()[file_id]

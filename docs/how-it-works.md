@@ -51,7 +51,9 @@ flowchart TD
   many -->|no| one["parse in this process"]
   pool --> save["replace each file's rows"]
   one --> save
-  save --> appmeta["per app: evaluate hooks.py,<br/>read every DocType JSON"]
+  save --> empty{"index was empty?"}
+  empty -->|yes| build["build the fact indexes once"] --> appmeta
+  empty -->|no| appmeta["per app: evaluate hooks.py,<br/>read every DocType JSON"]
   appmeta --> commit["commit, record indexed_at"] --> query
 ```
 
@@ -182,7 +184,8 @@ flowchart LR
 ```mermaid
 flowchart LR
   a["refs target [--kind k]"] --> r["refs rows naming the target:<br/>DocType, DocType.field, DocType:event,<br/>component, realtime event, import"]
-  r --> out["path:line kind via scope"]
+  r --> fold["one row per file, kind, via, access and scope,<br/>with every line of its uses"]
+  fold --> out["path:line[,line...] kind via access scope"]
 ```
 
 ### `sql`
@@ -325,9 +328,10 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-  a["paths from to [--depth n]"] --> bfs["breadth-first search from 'from',<br/>up to --depth calls"]
-  bfs <--> g["edges out of each function it reaches,<br/>read when the search gets there"]
-  bfs --> out["shortest routes first,<br/>each step with its edge kind"]
+  a["paths from to [--depth n]"] --> bfs["breadth-first search from 'from', one layer at a time,<br/>up to --depth calls or the layer that holds 'to'"]
+  bfs <--> g["edges out of the whole layer,<br/>read in one query"]
+  bfs --> dag["every edge that reaches a function<br/>at its shortest depth"]
+  dag --> out["every shortest route in call-site order, up to --limit,<br/>and how many more there are"]
 ```
 
 ### `surface`
@@ -367,10 +371,11 @@ flowchart LR
 ```mermaid
 flowchart TD
   a["flow qualname [--to] [--source] [--direct] [--follow]"] --> rows["flows rows of the function<br/>(recorded at index time)"]
-  rows --> f{"--follow?"}
+  rows --> ret["drop a row whose value came back from a call<br/>that does not return it (the callee's &lt;return&gt; rows)"]
+  ret --> f{"--follow?"}
   f -->|no| filt["filter: --to, --source, --direct"] --> out["path:line caller source callee arg via"]
-  f -->|yes| bind["argument → parameter of each callee the call graph resolves<br/>(position, keyword, *args, **kwargs, self skipped)"]
-  bind --> inner["that function's flows from the parameter"]
+  f -->|yes| bind["argument → parameter of each callee the call graph resolves<br/>(position, keyword, *args, **kwargs, self skipped);<br/>self.x = value → every method of the class that reads self.x"]
+  bind --> inner["that function's flows from the parameter or self.x"]
   inner --> depth{"--depth reached?"}
   depth -->|no| bind
   depth -->|yes| out2["rows with the original source,<br/>via from every function, and 'through'"]

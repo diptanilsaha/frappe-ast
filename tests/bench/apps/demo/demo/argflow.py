@@ -46,3 +46,78 @@ def inner(docname, limit=None):
 
 def remove(task):
 	frappe.db.delete("Demo Task", task)  # @remove
+
+
+class Finder:
+	def __init__(self):
+		self.rows = []
+
+	def find(self, key, limit=None):
+		self.limit = limit  # @store
+		self.query()
+		return self.rows
+
+	def query(self):
+		frappe.get_all("Demo Task", limit=self.limit)  # @stored_read
+
+
+def echo(text):
+	return text.strip()
+
+
+def search(key, limit):
+	rows = Finder().find(key, limit=limit)  # @find
+	for row in rows:
+		frappe.msgprint(row.title)  # @row
+	frappe.msgprint(echo(key))  # @echo
+	frappe.msgprint(str(limit))  # @builtin
+
+
+def fill(name):
+	filters = {}
+	filters["name"] = name
+	frappe.get_all("Demo Task", filters=filters)  # @filled
+
+
+def build_query(start):
+	query = frappe.qb.from_("Demo Task")
+	return query.where(frappe.qb.Field("date") >= start)
+
+
+def report(start):
+	frappe.db.sql(build_query(start))  # @criterion
+
+
+def make_row(title):
+	row = frappe._dict()
+	row.title = title
+	return row
+
+
+def show(title):
+	frappe.msgprint(make_row(title))  # @made
+
+
+class Query:
+	def __init__(self, doctype):
+		self.doctype = doctype
+
+	def conditions(self):
+		return f"`tab{self.doctype}`"
+
+
+def match(doctype):
+	frappe.db.sql(Query(doctype).conditions())  # @constructed
+
+
+def group(rows):
+	from collections import defaultdict
+
+	grouped = defaultdict(list)
+	for row in rows:
+		grouped[row[0]].append(row)
+	return grouped
+
+
+def show_groups(rows):
+	frappe.msgprint(group(rows))  # @grouped

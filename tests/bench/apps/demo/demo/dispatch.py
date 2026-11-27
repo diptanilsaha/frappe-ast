@@ -236,3 +236,40 @@ class ChildParser(Parser):
 class GrandParser(ChildParser):
 	def parse(self, content):
 		super().parse(content)
+
+
+
+class Hub:
+	def meet(self):
+		return self.end()
+
+	def end(self):
+		return []
+
+
+def fan_out():
+	left()
+	right()
+
+
+def left():
+	return left_inner()
+
+
+def left_inner():
+	return Hub().meet()
+
+
+def right():
+	return right_inner()
+
+
+def right_inner():
+	hub = Hub()
+	return hub.meet()
+
+
+class Counter:
+	def bump(self):
+		if self.total:  # @total_first
+			return self.total + 1  # @total_again

@@ -66,13 +66,21 @@ class Lookup:
 
 	def refs(self, target: str, kind: str = "") -> dict:
 		kind_sql, params = (" and r.kind = ?", [kind]) if kind else ("", [])
+		# One row per (file, kind, via, access, scope), at its first use; `lines` lists every use.
+		# SQLite takes the bare `r.col` from the row that holds min(line).
 		refs = self.store.rows(
-			"select f.path, r.kind, r.via, r.access, r.line, r.scope from refs r join files f on f.id = r.file_id "
-			f"where r.target = ?{kind_sql} order by f.path, r.line limit ?",
+			"select f.path, r.kind, r.via, r.access, min(r.line) line, r.col, r.scope, "
+			"group_concat(r.line) lines from refs r join files f on f.id = r.file_id "
+			f"where r.target = ?{kind_sql} group by f.path, r.kind, r.via, r.access, r.scope "
+			"order by f.path, line limit ?",
 			target,
 			*params,
 			self.limit,
 		)
+		for ref in refs:
+			lines = sorted({int(n) for n in ref.pop("lines").split(",")})
+			if len(lines) > 1:
+				ref["lines"] = lines
 		hooks = self.store.rows(
 			"select app, key, p1, p2, p3, value, line from hooks where value = ? or p1 = ?", target, target
 		)

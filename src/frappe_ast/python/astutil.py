@@ -15,6 +15,35 @@ def dotted(node: ast.expr) -> str:
 	return ""
 
 
+def callee_text(node: ast.Call) -> str:
+	"""The callee as the analyzer writes it: `a.b`, or `a().b` for a method on the result of a call
+	to `a`, however long the chain between them (`qb.from_(t).where(c).limit(n)` is
+	`qb.from_().limit`). "" when no call in the chain has a dotted name."""
+	callee = dotted(node.func)
+	if callee or not isinstance(node.func, ast.Attribute):
+		return callee
+	base = node.func.value
+	while True:
+		if isinstance(base, ast.Call):
+			inner = dotted(base.func)
+			if inner:
+				return f"{inner}().{node.func.attr}"
+			base = base.func
+		elif isinstance(base, ast.Attribute | ast.Subscript):
+			base = base.value
+		else:
+			return ""
+
+
+def call_position(node: ast.Call) -> tuple[int, int]:
+	"""(line, byte offset) of the name a call calls: `limit` in `q.where(x).limit(n)`, so each call of
+	a chain has its own position, on the line that shows it."""
+	func = node.func
+	if isinstance(func, ast.Attribute) and func.end_lineno is not None:
+		return func.end_lineno, func.end_col_offset - len(func.attr.encode())
+	return node.lineno, node.col_offset
+
+
 def truthy(node: ast.expr) -> bool:
 	return isinstance(node, ast.Constant) and bool(node.value)
 

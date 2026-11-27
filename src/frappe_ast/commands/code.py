@@ -7,7 +7,9 @@ from frappe_ast.queries.callgraph import CallGraph
 from frappe_ast.queries.flow import FlowQuery
 from frappe_ast.queries.lookup import Lookup
 from frappe_ast.queries.outline import Outline
+from frappe_ast.queries.paths import ShortestPaths
 from frappe_ast.queries.surface import Surface
+from frappe_ast.render import short_scope
 from frappe_ast.workspace import Bench
 
 
@@ -94,21 +96,23 @@ class PathsCommand(Command):
 		p.add_argument("--depth", type=int, default=12)
 
 	def run(self, ctx, args):
-		paths = CallGraph(ctx.store()).paths(args.source, args.target, min(args.limit, 20), args.depth)
-		if not paths:
+		found = ShortestPaths(CallGraph(ctx.store())).find(
+			args.source, args.target, min(args.limit, 20), args.depth
+		)
+		if not found["routes"]:
 			ctx.render.emit(f"no path from {args.source} to {args.target} within {args.depth} calls")
 			return 1
-		ctx.render.emit(
-			[
-				{
-					"route": i + 1,
-					"steps": [
-						f"{e['path']}:{e['line']}  {e['caller']} -[{e['kind']}]-> {e['callee']}" for e in p
-					],
-				}
-				for i, p in enumerate(paths)
-			]
-		)
+		routes = [
+			{
+				"route": i + 1,
+				"steps": [
+					f"{e['path']}:{e['line']}  {e['caller']} -[{e['kind']}]-> {e['callee']}" for e in route
+				],
+			}
+			for i, route in enumerate(found["routes"])
+		]
+		more = {"more": f"{found['more']} more routes of the same length"} if found["more"] else {}
+		ctx.render.emit({"routes": routes, **more})
 
 
 class SurfaceCommand(Command):
@@ -190,7 +194,7 @@ class FlowCommand(Command):
 			rows = query.follow(args.target, args.to or "", source, args.direct, args.depth)
 		else:
 			rows = query.rows(args.target or "", args.to or "", source, args.direct, args.app)
-		ctx.render.emit(rows if args.json else rows[: args.limit])
+		ctx.render.emit(rows if args.json else _grouped(rows[: args.limit]))
 
 
 class RefsCommand(Command):
@@ -216,3 +220,17 @@ class SqlCommand(Command):
 		store = ctx.store()
 		store.db.execute("pragma query_only = 1")
 		ctx.render.emit(store.rows(args.query))
+
+
+def _grouped(rows: list[dict]) -> list[dict]:
+	"""Rows for text output: each `through` chain once, over the rows that came through it, and the
+	caller without the module its path already shows."""
+	flat, groups = [], {}
+	for row in rows:
+		row = {**row, "caller": short_scope(row["path"].rsplit(":", 1)[0], row["caller"])}
+		through = row.pop("through", None)
+		if through:
+			groups.setdefault(" > ".join(through), []).append(row)
+		else:
+			flat.append(row)
+	return flat + [{"through": chain, "rows": found} for chain, found in groups.items()]

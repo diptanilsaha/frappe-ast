@@ -9,6 +9,7 @@ from frappe_ast.queries.apps import AppGraph
 from frappe_ast.queries.component import ComponentReport
 from frappe_ast.queries.impact import Impact
 from frappe_ast.queries.lookup import Lookup
+from frappe_ast.store import FACT_INDEXES, _index_names
 from frappe_ast.workspace import Bench
 
 FUI = "apps/demo/frontend/node_modules/frappe-ui"
@@ -111,3 +112,9 @@ def test_cli_outline_json(bench_root, capsys):
 	code = main(["outline", str(bench_root / "apps/demo/demo/demo/doctype/demo_task/demo_task.js"), "--json"])
 	assert code == 0
 	assert json.loads(capsys.readouterr().out)["frappe"]["form_events"][0].endswith("Demo Task:refresh")
+
+
+def test_a_first_index_builds_every_fact_index(store):
+	# The first index loads facts with the indexes dropped (Store.bulk) and builds them at the end.
+	built = {r["name"] for r in store.rows("select name from sqlite_master where type = 'index'")}
+	assert set(_index_names(FACT_INDEXES)) <= built

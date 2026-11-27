@@ -41,7 +41,11 @@ class Indexer:
 		removed = [p for p, stamp in stamps.items() if p not in seen and stamp[3] in unit_names]
 		for path in removed:
 			self.store.delete_file(path)
-		self._analyze(todo, app_names, log)
+		if stamps:
+			self._analyze(todo, app_names, log)
+		else:
+			with self.store.bulk():  # a first index, or one the analyzer change cleared
+				self._analyze(todo, app_names, log)
 		for app in apps:
 			self._index_app_meta(app)
 		self._save_library_meta(libraries, frontends)

@@ -83,3 +83,62 @@ def test_follow_keeps_the_flows_of_the_function_itself(flows):
 def test_follow_stops_at_depth(flows):
 	assert flows.follow("demo.argflow.outer", to="frappe.db.delete", depth=1) == []
 	assert flows.follow("demo.argflow.outer", to="frappe.db.delete", depth=2)
+
+
+def test_each_flow_joins_one_call(store):
+	# A flow names its call by position, so two calls on one line never share a receiver.
+	(row,) = store.rows(
+		"select count(*) n from (select w.rowid from flows w join calls c on c.file_id = w.file_id "
+		"and c.caller = w.caller and c.line = w.line and c.col = w.col and c.callee = w.callee "
+		"group by w.rowid having count(*) > 1)"
+	)
+	assert row["n"] == 0
+
+
+def test_follow_drops_a_value_the_callee_does_not_return(flows, lines):
+	# Finder.find returns self.rows: the rows read from it carry neither key nor limit (#13). echo
+	# returns its parameter, and str is outside the bench, so both keep what they are given.
+	at = {(r["path"].rsplit(":", 1)[1], r["source"]) for r in flows.follow("demo.argflow.search")}
+	assert (str(lines["find"]), "param:limit") in at
+	assert not {(str(lines["row"]), "param:key"), (str(lines["row"]), "param:limit")} & at
+	assert (str(lines["echo"]), "param:key") in at
+	assert (str(lines["builtin"]), "param:limit") in at
+
+
+def test_follow_crosses_a_store_on_self(flows, lines):
+	# find stores limit on self, and query reads it: the read is part of limit's flow (#12).
+	rows = [
+		r
+		for r in flows.follow("demo.argflow.search", source="param:limit")
+		if r["path"] == f"{ARGFLOW}:{lines['stored_read']}"
+	]
+	(row,) = rows
+	assert row["callee"] == "frappe.get_all" and row["arg"] == "limit"
+	assert [step.split("  ", 1)[1] for step in row["through"]] == [
+		"demo.argflow.Finder.find (limit)",
+		"demo.argflow.Finder.query (self.limit)",
+	]
+
+
+def test_store_on_self_is_a_row(flows, lines):
+	rows = flows.rows("demo.argflow.Finder.find")
+	assert ("find", "param:limit", "demo.argflow.Finder.limit", "=") in facts(rows)
+
+
+def test_filling_a_container_carries_what_went_in(flows, lines):
+	(row,) = flows.rows("demo.argflow.fill", to="frappe.get_all")
+	assert (row["source"], row["arg"], row["via"]) == ("param:name", "filters", "container")
+
+
+@pytest.mark.parametrize(
+	"function, tag, source",
+	[
+		("demo.argflow.report", "criterion", "param:start"),  # a comparison builds the criterion
+		("demo.argflow.show", "made", "param:title"),  # row.title = title, then return row
+		("demo.argflow.match", "constructed", "param:doctype"),  # Query(doctype) returns the instance
+		("demo.argflow.show_groups", "grouped", "param:rows"),  # grouped[k].append(row)
+	],
+)
+def test_a_returned_value_keeps_what_was_put_in_it(flows, lines, function, tag, source):
+	at = {(r["path"], r["source"]) for r in flows.rows(function)}
+	assert (f"{ARGFLOW}:{lines[tag]}", source) in at

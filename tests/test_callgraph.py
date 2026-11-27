@@ -4,6 +4,7 @@ import pytest
 
 from frappe_ast.queries import callgraph
 from frappe_ast.queries.callgraph import CallGraph
+from frappe_ast.queries.paths import ShortestPaths
 
 TASK = "demo.demo.doctype.demo_task.demo_task"
 
@@ -90,5 +91,28 @@ def test_wide_overrides_are_skipped(store, monkeypatch):
 
 
 def test_paths_cross_edge_kinds(graph):
-	paths = graph.paths("demo.dispatch.use_engine", "demo.dispatch.task_query")
-	assert [e["kind"] for e in paths[0]] == ["instance", "call", "hook"]
+	routes = ShortestPaths(graph).find("demo.dispatch.use_engine", "demo.dispatch.task_query")["routes"]
+	assert [e["kind"] for e in routes[0]] == ["instance", "call", "hook"]
+
+
+def test_paths_returns_every_shortest_route(graph):
+	# fan_out -> left -> left_inner -> Hub.meet -> end, and the same length through right: both
+	# routes meet at Hub.meet, so the search must keep the second edge into it (#14).
+	found = ShortestPaths(graph).find("demo.dispatch.fan_out", "demo.dispatch.Hub.end", limit=10)
+	routes = [[e["callee"].rsplit(".", 1)[-1] for e in route] for route in found["routes"]]
+	assert routes == [
+		["left", "left_inner", "meet", "end"],
+		["right", "right_inner", "meet", "end"],
+	]
+	assert found["more"] == 0
+
+
+def test_paths_counts_the_routes_past_the_limit(graph):
+	found = ShortestPaths(graph).find("demo.dispatch.fan_out", "demo.dispatch.Hub.end", limit=1)
+	assert len(found["routes"]) == 1
+	assert found["more"] == 1
+
+
+def test_paths_none_when_unreachable(graph):
+	found = ShortestPaths(graph).find("demo.dispatch.Hub.end", "demo.dispatch.fan_out")
+	assert found == {"routes": [], "more": 0}

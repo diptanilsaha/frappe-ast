@@ -5,11 +5,12 @@ import json
 import os
 import sqlite3
 from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from frappe_ast.model import FileFacts
 
-SCHEMA_VERSION = "7"
+SCHEMA_VERSION = "8"
 SCHEMA = """
 create table if not exists meta (key text primary key, value text);
 create table if not exists files (
@@ -22,13 +23,16 @@ create table if not exists symbols (
 	whitelisted integer, allow_guest integer, http_methods text
 );
 create table if not exists calls (
-	file_id integer, caller text, callee text, resolved text, line integer, receiver text, arg text
+	file_id integer, caller text, callee text, resolved text, line integer, receiver text, arg text,
+	col integer
 );
 create table if not exists refs (
-	file_id integer, kind text, target text, via text, line integer, scope text, access text
+	file_id integer, kind text, target text, via text, line integer, scope text, access text,
+	col integer
 );
 create table if not exists flows (
-	file_id integer, caller text, callee text, resolved text, line integer, arg text, source text, via text
+	file_id integer, caller text, callee text, resolved text, line integer, arg text, source text,
+	via text, col integer, returns text
 );
 create table if not exists findings (
 	file_id integer, rule text, severity text, message text, line integer, scope text
@@ -44,6 +48,16 @@ create table if not exists permissions (
 create table if not exists doctype_links (
 	doctype text, kind text, target text, value text, grp text, extra text
 );
+create index if not exists ix_hooks_value on hooks(value);
+create index if not exists ix_fields_dt on fields(doctype);
+create index if not exists ix_fields_opt on fields(options);
+create index if not exists ix_perms_dt on permissions(doctype);
+create index if not exists ix_perms_role on permissions(role);
+create index if not exists ix_dtlinks_dt on doctype_links(doctype);
+create index if not exists ix_dtlinks_target on doctype_links(kind, target);
+"""
+FACT_TABLES = ("symbols", "calls", "refs", "flows", "findings")
+FACT_INDEXES = """
 create index if not exists ix_sym_qual on symbols(qualname);
 create index if not exists ix_sym_name on symbols(name);
 create index if not exists ix_sym_file on symbols(file_id);
@@ -54,16 +68,9 @@ create index if not exists ix_calls_caller on calls(caller);
 create index if not exists ix_refs_target on refs(kind, target);
 create index if not exists ix_refs_file on refs(file_id);
 create index if not exists ix_refs_scope on refs(scope);
+create index if not exists ix_flows_caller on flows(caller);
 create index if not exists ix_findings_file on findings(file_id);
-create index if not exists ix_hooks_value on hooks(value);
-create index if not exists ix_fields_dt on fields(doctype);
-create index if not exists ix_fields_opt on fields(options);
-create index if not exists ix_perms_dt on permissions(doctype);
-create index if not exists ix_perms_role on permissions(role);
-create index if not exists ix_dtlinks_dt on doctype_links(doctype);
-create index if not exists ix_dtlinks_target on doctype_links(kind, target);
 """
-FACT_TABLES = ("symbols", "calls", "refs", "flows", "findings")
 DOCTYPE_TABLES = ("fields", "permissions", "doctype_links")
 
 
@@ -105,6 +112,17 @@ class Store:
 			(facts.path, app, facts.lang, facts.module, mtime, size, facts.error),
 		)
 		self._insert_facts(cur.lastrowid, facts)
+
+	@contextmanager
+	def bulk(self):
+		"""Load facts into an empty index with the fact indexes dropped, then build each once:
+		cheaper than updating every index per row."""
+		for name in _index_names(FACT_INDEXES):
+			self.db.execute(f"drop index if exists {name}")
+		try:
+			yield
+		finally:
+			self.db.executescript(FACT_INDEXES)
 
 	def delete_file(self, path: str):
 		row = self.db.execute("select id from files where path = ?", (path,)).fetchone()
@@ -196,16 +214,22 @@ class Store:
 			],
 		)
 		self.db.executemany(
-			"insert into calls values (?,?,?,?,?,?,?)",
-			[(file_id, c.caller, c.callee, c.resolved, c.line, c.receiver, c.arg) for c in facts.calls],
+			"insert into calls values (?,?,?,?,?,?,?,?)",
+			[
+				(file_id, c.caller, c.callee, c.resolved, c.line, c.receiver, c.arg, c.col)
+				for c in facts.calls
+			],
 		)
 		self.db.executemany(
-			"insert into refs values (?,?,?,?,?,?,?)",
-			[(file_id, r.kind, r.target, r.via, r.line, r.scope, r.access) for r in facts.refs],
+			"insert into refs values (?,?,?,?,?,?,?,?)",
+			[(file_id, r.kind, r.target, r.via, r.line, r.scope, r.access, r.col) for r in facts.refs],
 		)
 		self.db.executemany(
-			"insert into flows values (?,?,?,?,?,?,?,?)",
-			[(file_id, f.caller, f.callee, f.resolved, f.line, f.arg, f.source, f.via) for f in facts.flows],
+			"insert into flows values (?,?,?,?,?,?,?,?,?,?)",
+			[
+				(file_id, f.caller, f.callee, f.resolved, f.line, f.arg, f.source, f.via, f.col, f.returns)
+				for f in facts.flows
+			],
 		)
 		self.db.executemany(
 			"insert into findings values (?,?,?,?,?,?)",
@@ -219,7 +243,7 @@ class Store:
 			for table in ("files", *FACT_TABLES, "hooks", "doctypes", *DOCTYPE_TABLES):
 				self.db.execute(f"drop table if exists {table}")
 			self.db.execute("delete from meta")
-		self.db.executescript(SCHEMA)
+		self.db.executescript(SCHEMA + FACT_INDEXES)
 		self.set_meta("schema", SCHEMA_VERSION)
 		self.commit()
 
@@ -240,3 +264,7 @@ def _field_row(doctype: str, idx: int, f: dict) -> tuple:
 		str(f.get("options", "")),
 		json.dumps(attrs),
 	)
+
+
+def _index_names(ddl: str) -> list[str]:
+	return [line.split()[5] for line in ddl.splitlines() if line.startswith("create index")]

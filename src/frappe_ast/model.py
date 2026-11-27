@@ -34,6 +34,7 @@ class Call:
 	# for the result of calling <dotted> (an instance, when <dotted> is a class). "" otherwise.
 	receiver: str = ""
 	arg: str = ""  # the first positional argument when it is a string literal
+	col: int = 0  # 1-based character column; 0 when the analyzer does not know it
 
 
 @dataclass
@@ -47,6 +48,8 @@ class Flow:
 	arg: str  # "0", "1", ... positional; a keyword name; "*" / "**" for unpacking
 	source: str  # "param:<name>", "form_dict[:<key>]", "request.<attr>[:<key>]"
 	via: str = ""  # the outermost call or operation between source and argument; "" when direct
+	col: int = 0  # of the call
+	returns: str = ""  # `line:col:callee:arg;...`: the calls whose return the value came through
 
 
 @dataclass
@@ -59,6 +62,7 @@ class Ref:
 	line: int
 	scope: str = ""  # enclosing symbol qualname
 	access: str = ""  # read, write, delete, call, render
+	col: int = 0
 
 
 @dataclass

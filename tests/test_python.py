@@ -5,6 +5,7 @@ from support import tagged_lines
 
 from frappe_ast.python import compat
 from frappe_ast.python.analyzer import PythonAnalyzer
+from frappe_ast.python.astutil import callee_text
 from frappe_ast.python.hooks import HooksReader
 
 API = "apps/demo/demo/api.py"
@@ -189,3 +190,60 @@ def test_syntax_newer_than_the_running_python(analyze, bench_root):
 	assert lines["demo.utils.new_syntax.report_url"] == 23
 	# An f-string that parses alone keeps its text.
 	assert ("demo.api.make", "url") in facts.pairs("dotted")
+
+
+def test_facts_carry_the_column():
+	# A call is at the name it calls (`log`), in 1-based characters: "é" before the second is 2 bytes.
+	source = 'import frappe\n\n\ndef run(name):\n\tfrappe.log("é"), frappe.log(name)\n'
+	facts = PythonAnalyzer(APPS).analyze("demo/cols.py", source, "demo.cols")
+	assert sorted((c.line, c.col) for c in facts.calls if c.callee == "frappe.log") == [(5, 9), (5, 26)]
+	assert {(f.line, f.col) for f in facts.flows} == {(5, 26)}
+
+
+def test_every_attribute_use_is_a_ref():
+	source = "class Box:\n\tdef run(self):\n\t\tif self.size:\n\t\t\treturn self.size + self.size\n"
+	facts = PythonAnalyzer(APPS).analyze("demo/box.py", source, "demo.box")
+	uses = sorted((r.line, r.col) for r in facts.refs if r.kind == "attribute")
+	assert uses == [(3, 6), (4, 11), (4, 23)]
+
+
+def test_fields_set_by_name(analyze, bench_root):
+	lines = tagged_lines(bench_root / "apps/demo/demo/fields.py")
+	cls = "self:demo.fields.VirtualSettings"
+	writes = {
+		(r.target, r.via, r.line)
+		for r in analyze("apps/demo/demo/fields.py").refs("attribute")
+		if r.access == "set"
+	}
+	assert writes == {
+		("page_size", cls, lines["load"]),  # a dict bound to a name, then super().__init__ (#11)
+		("name", cls, lines["load"]),
+		("page_size", cls, lines["update"]),
+		("page_size", cls, lines["db_set"]),
+		("assigned_to", "doctype:Demo Task", lines["new_task"]),
+	}
+
+
+def test_flow_into_a_method_on_a_call_chain():
+	source = (
+		"import frappe\n\n\ndef page(size):\n"
+		"\treturn frappe.qb.from_('Demo Task').select('name').limit(size).run()\n"
+	)
+	facts = PythonAnalyzer(APPS).analyze("demo/page.py", source, "demo.page")
+	assert {(f.callee, f.arg, f.source) for f in facts.flows if f.arg == "0"} == {
+		("frappe.qb.from_().limit", "0", "param:size")
+	}
+	assert "frappe.qb.from_().limit" in {c.callee for c in facts.calls}
+
+
+@pytest.mark.parametrize(
+	"expr, callee",
+	[
+		("make()().run()", "make().run"),  # a call of a call's result
+		("rows[0].get(1).strip()", ""),  # no call in the chain has a dotted name
+		("frappe.qb.from_('T').where(1).limit(2)", "frappe.qb.from_().limit"),
+	],
+)
+def test_callee_of_a_call_chain(expr, callee):
+	node = compat.parse(expr).body[0].value
+	assert callee_text(node) == callee

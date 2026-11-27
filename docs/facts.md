@@ -4,6 +4,13 @@ The formats of the rows analyzers write, for reading the index with `frappe-ast 
 changing an analyzer. [How it works](how-it-works.md#3-what-the-index-holds) lists the tables;
 this page says what the values in them mean.
 
+`calls`, `refs` and `flows` rows carry `line` and `col`: the 1-based line and 1-based
+character column of the fact. A call is at the name it calls, on that name's line: `limit` in
+`q.where(x).limit(n)`, so each call of a chain has its own position. Other facts are where they
+start (an attribute's receiver, a reference's literal). `col` is `0` where the analyzer has no node to point at: records, Vue templates,
+custom fields and monkey patches. A fact's (file, line, col) names it on its own: `flows` joins
+`calls` by it, so two calls on one line never share a receiver.
+
 ## `calls`
 
 | Column | Value |
@@ -45,7 +52,7 @@ One row per reference a Frappe API makes. `target` and `via` depend on `kind`:
 | `realtime` | the event name | `access` is `publish` (Python) or `listen` (JS) |
 | `record_link` | `<kind>:<name>` | |
 | `monkey_patch` | the patched dotted path | the replacement: a dotted name, `<lambda>`, or `<function>.<name>` for a wrapper the patching function defines; queries count it only when the replacement is a function |
-| `attribute` | an attribute name read or assigned (`access` is `read` or `write`), not called; once per function, receiver and access | the receiver: `self:<class>` for `self.x` in a method of `<class>`, or a `calls.receiver` value (`call:...`, `doctype:<DocType>`); queries count it only when the attribute is a `@property` |
+| `attribute` | an attribute name read or assigned (`access` is `read` or `write`), not called, or a field set by name (`set`: a dict key passed to `super().__init__`, `update` or `frappe.get_doc`, the name passed to `db_set` or `set`); one row per use | the receiver: `self:<class>` for `self.x` in a method of `<class>`, or a `calls.receiver` value (`call:...`, `doctype:<DocType>`); queries count it only when the attribute is a `@property`, once per function, receiver and access |
 | `callback` | a bench-app function named without being called | the call it is passed to (`frappe.enqueue`, `werkzeug.routing.Rule`), or `dict` when a dict holds it |
 
 `scope` is the enclosing symbol, and `access` says what the reference does (`read`, `write`,
@@ -53,13 +60,17 @@ One row per reference a Frappe API makes. `target` and `via` depend on `kind`:
 
 ## `flows`
 
-One row per (call, argument, source) inside one function.
+One row per (call, argument, source) inside one function, and two kinds of row that are not
+calls: `callee` `<return>` (a value the function returns or yields; `arg` is `""`) and `callee`
+`self.<x>` with `arg` `=` (a value a method stores on the instance; `resolved` is
+`<class>.<x>`).
 
 | Column | Value |
 |---|---|
 | `arg` | the argument: `0`, `1`, ... by position, a keyword name, or `*` / `**` for unpacking |
-| `source` | `param:<name>`, `form_dict[:<key>]` or `request.<attr>[:<key>]`; the request tables are in `python/frappe_api.py` |
-| `via` | the steps between source and argument, outermost first: a resolved call, `.<method>`, `f-string`, `format`, `container`; `""` when the value arrives unchanged |
+| `source` | `param:<name>`, `form_dict[:<key>]`, `request.<attr>[:<key>]` (the request tables are in `python/frappe_api.py`), or `self.<x>` for an attribute that a method of the class stores a source on |
+| `via` | the steps between source and argument, outermost first: a resolved call, `call` for one that is not resolved, `.<method>`, `f-string`, `format`, `container`; `""` when the value arrives unchanged |
+| `returns` | the calls whose return value the source came through, outermost first, as `line:col:callee:arg;...`: `queries/returns.py` drops the row when a callee does not return that argument |
 
 A row records a fact, never a judgement: whether a step makes a value acceptable for a call is
 for the reader to decide.
