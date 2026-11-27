@@ -20,7 +20,10 @@ Issues = "https://github.com/diptanilsaha/frappe-ast/issues"
 frappe-ast = "frappe_ast.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = [
+    "pytest>=8",
+    "pytest-cov>=7.1.0",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -40,3 +43,11 @@ ignore = ["W191", "E101", "E501", "B905"]
 
 [tool.ruff.format]
 indent-style = "tab"
+
+[tool.coverage.run]
+source = ["frappe_ast"]
+
+[tool.coverage.report]
+fail_under = 89  # CI fails below this; raise it as coverage grows
+show_missing = true
+skip_covered = true

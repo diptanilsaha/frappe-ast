@@ -50,11 +50,11 @@ commands/                    one Command class per subcommand  ->  render.py or 
    To assert on a line, tag it in the fixture with a trailing `# @tag` and look it up with `support.tagged_lines`, so fixture edits never shift an assertion. Watch the test fail.
 3. **Make the change.** Done when all of these are clean, run from the repository root:
    ```sh
-   uv run pytest -q && uv run --python 3.11 --isolated pytest -q
+   uv run pytest -q --cov && uv run --python 3.11 --isolated pytest -q
    uvx ruff check src tests && uvx ruff format --check src tests
    uv run frappe-ast check --json --bench ~/benches/bench16 > after.json   # diff against before.json
    ```
-   Each finding in `after.json` that is not in `before.json` is a false positive until you have read the code it points to and confirmed it.
+   Each finding in `after.json` that is not in `before.json` is a false positive until you have read the code it points to and confirmed it. CI (`.github/workflows/ci.yml`) runs the first two lines on every pull request, and fails when coverage drops below `fail_under` in `pyproject.toml`: new code comes with the test that covers it.
 
 ## Feedback loop
 
